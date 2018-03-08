@@ -24,8 +24,6 @@ class bilstm(object):
         self.char_hidden_dim = self.params['char_hidden_dim']
         self.char_bidirect = self.params['char_bidirect']
 
-
-
     def _word_embedding(self, word_input_ids):
         with tf.variable_scope('word_embedding') as vs:
             if self.params['use_word2vec']:
@@ -162,6 +160,9 @@ class bilstm(object):
             print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
 
         return logits
+
+
+
 
     def _char_attention_layer(self, embedded_words, char_hiddens, word_lengths):
         # embedded_words: (batch_size, max_sent, word_dim)
