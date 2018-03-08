@@ -206,6 +206,8 @@ class bilstm(object):
 
         return context, batch_alphas
 
+
+
     # TODO
     def _word_attention_layer(self, embedded_words, sentence_lengths):
         # embedded_words: (batch_size, max_sent, word_dim)
