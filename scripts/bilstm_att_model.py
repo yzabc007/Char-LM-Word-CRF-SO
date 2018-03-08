@@ -24,6 +24,8 @@ class bilstm(object):
         self.char_hidden_dim = self.params['char_hidden_dim']
         self.char_bidirect = self.params['char_bidirect']
 
+
+
     def _word_embedding(self, word_input_ids):
         with tf.variable_scope('word_embedding') as vs:
             if self.params['use_word2vec']:
