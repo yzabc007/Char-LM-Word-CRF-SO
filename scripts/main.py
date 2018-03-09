@@ -24,7 +24,7 @@ def main():
     Model_Parameters = Config()
     np.random.seed(Model_Parameters['random_seed'])
 
-    if Model_Parameters['train_file_path'][:3] == 'pkl':
+    if Model_Parameters['train_file_path'][-3::] == 'pkl':
         train_sents = cPickle.load(open(Model_Parameters['train_file_path']))
         val_sents = cPickle.load(open(Model_Parameters['val_file_path']))
         test_sents = cPickle.load(open(Model_Parameters['test_file_path']))
@@ -62,6 +62,7 @@ def main():
         print 'Begin mapping from random ...'
         dic_words, word_to_id, id_to_word = word_mapping_random(train_sents)
     Model_Parameters['vocab_size'] = len(word_to_id)
+    singletons = set([w[0] for w in dic_words.items() if w[1] == 1])
     print 'Word mapped!'
 
     dic_tags, tag_to_id, id_to_tag = tag_mapping(train_sents)
@@ -78,9 +79,12 @@ def main():
     print 'Mapping finished!'
 
     # index data
-    train_idx_data = make_idx_data(Model_Parameters, train_sents, word_to_id, tag_to_id, char_to_id)
-    val_idx_data = make_idx_data(Model_Parameters, val_sents, word_to_id, tag_to_id, char_to_id)
-    test_idx_data = make_idx_data(Model_Parameters, test_sents, word_to_id, tag_to_id, char_to_id)
+    train_idx_data = make_idx_data(Model_Parameters, train_sents, word_to_id,
+                                   tag_to_id, char_to_id=char_to_id, singletons=singletons)
+    val_idx_data = make_idx_data(Model_Parameters, val_sents, word_to_id,
+                                 tag_to_id, char_to_id=char_to_id, singletons=singletons)
+    test_idx_data = make_idx_data(Model_Parameters, test_sents, word_to_id,
+                                  tag_to_id, char_to_id=char_to_id, singletons=singletons)
     print 'Finish digitizing!'
     print 'An example: ', train_idx_data[0]
 
