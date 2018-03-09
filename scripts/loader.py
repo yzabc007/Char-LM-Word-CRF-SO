@@ -108,8 +108,11 @@ def word_mapping_glove(sents, Model_Parameters):
         drange = np.sqrt(6. / (np.sum([vocab_size, embed_dim])))
         for word in vocab_:
             if word not in word_vecs_ and vocab_[word] >= min_df:
-                word_vecs_[word] = np.random.uniform(-drange, drange, embed_dim)
-        word_vecs_[unk_token] = np.random.uniform(-drange, drange, embed_dim)
+                # word_vecs_[word] = np.random.uniform(-drange, drange, embed_dim)
+                word_vecs_[word] = np.random.uniform(-0.25, 0.25, embed_dim)
+
+        # word_vecs_[unk_token] = np.random.uniform(-drange, drange, embed_dim)
+        word_vecs_[unk_token] = np.random.uniform(-0.25, 0.25, embed_dim)
 
     def get_embed_W(word_vecs_, embed_dim=300):
         """
@@ -127,8 +130,6 @@ def word_mapping_glove(sents, Model_Parameters):
             id_to_word_[i] = word
             i += 1
         return W, word_to_id_, id_to_word_
-
-    singletons = [w[0] for w in vocab.items() if w[1] == 1]
 
     word_vecs = load_glove_vec(Model_Parameters['pre_trained_path'], vocab, Model_Parameters['word_input_dim'])
 
@@ -234,11 +235,26 @@ def extract_prior_dict(Model_Parameters, train_sents):
     return prior_dict
 
 
+def insert_singletons(words, word_to_id, singletons, unk, lower, p=0.5):
+    """
+    Replace singletons by the unknown word with a probability p.
+    """
+    def f(x): return x if lower else x
+    new_words = []
+    for w in words:
+        if w in singletons and np.random.uniform() < p:
+            new_words.append(word_to_id[unk])
+        else:
+            new_words.append(word_to_id[f(w) if f(w) in word_to_id else unk])
+    return new_words
+
+
 def make_idx_data(Model_Parameters,
                   sents,
                   word_to_id,
                   tag_to_id,
-                  char_to_id=None):
+                  char_to_id=None,
+                  singletons=None):
     '''
     convert strings to ids
     '''
@@ -247,7 +263,10 @@ def make_idx_data(Model_Parameters,
     for sent in sents:
         cur_sent_dict = {}
         seq_words = [w[0] for w in sent]
-        word_ids = [word_to_id[f(w) if f(w) in word_to_id else Model_Parameters['unk']] for w in seq_words]
+        if Model_Parameters['insert_singletons']:
+            word_ids = insert_singletons(seq_words, word_to_id, singletons, Model_Parameters['unk'], Model_Parameters['word_lower'] )
+        else:
+            word_ids = [word_to_id[f(w) if f(w) in word_to_id else Model_Parameters['unk']] for w in seq_words]
         tag_ids = [tag_to_id[w[-1]] for w in sent]
         assert(len(word_ids) == len(tag_ids))
 
@@ -258,10 +277,7 @@ def make_idx_data(Model_Parameters,
         if char_to_id:
             char_ids = []
             for idx, word in enumerate(seq_words):
-                if idx != len(seq_words) - 1:
-                    cur_chars = [char_to_id[c if c in char_to_id else '<UNK>'] for c in word] + [char_to_id[' ']]
-                else:
-                    cur_chars = [char_to_id[c if c in char_to_id else '<UNK>'] for c in word]
+                cur_chars = [char_to_id[c if c in char_to_id else '<UNK>'] for c in word]
                 char_ids.append(cur_chars)
             cur_sent_dict['char_ids'] = char_ids
 
