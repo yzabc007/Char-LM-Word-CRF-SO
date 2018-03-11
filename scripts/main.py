@@ -8,7 +8,6 @@ import cPickle
 
 import tensorflow as tf
 from bilstm_model import *
-from bilstm_att_model import *
 from utils import *
 from loader import *
 from conlleval_py import *
@@ -38,7 +37,6 @@ def main():
         update_tag_scheme(train_sents, Model_Parameters['tag_scheme'])
         update_tag_scheme(val_sents, Model_Parameters['tag_scheme'])
         update_tag_scheme(test_sents, Model_Parameters['tag_scheme'])
-
     print 'Data loaded!'
 
     print 'Training size: ', len(train_sents)
@@ -52,6 +50,16 @@ def main():
         val_sents = val_sents[:Model_Parameters['val_size']]
     if Model_Parameters['test_size'] and Model_Parameters['test_size'] < len(test_sents):
         test_sents = test_sents[:Model_Parameters['test_size']]
+
+    if Model_Parameters['char_encode'] == 'cnn':
+        Model_Parameters['max_sent_len'] = max(get_max_sent_length(train_sents),
+                                               get_max_sent_length(val_sents),
+                                               get_max_sent_length(test_sents))
+        Model_Parameters['max_char_len'] = max(get_max_char_length(train_sents),
+                                               get_max_char_length(val_sents),
+                                               get_max_char_length(test_sents))
+        print 'max_sent_len', Model_Parameters['max_sent_len']
+        print 'max_char_len', Model_Parameters['max_char_len']
 
     # create mapping
     if Model_Parameters['pre_trained_path']:
@@ -75,7 +83,6 @@ def main():
     # print char_to_id
     Model_Parameters['char_vocab_size'] = len(char_to_id)
     print 'Character mapped!'
-
     print 'Mapping finished!'
 
     # index data
@@ -87,9 +94,6 @@ def main():
                                   tag_to_id, char_to_id=char_to_id, singletons=singletons)
     print 'Finish digitizing!'
     print 'An example: ', train_idx_data[0]
-
-    if Model_Parameters['char_attention']:
-        print 'Using character attention'
 
     model = bilstm(Model_Parameters)
 
