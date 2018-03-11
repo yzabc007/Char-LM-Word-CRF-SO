@@ -1,5 +1,5 @@
 #!/bin/bash
-#PBS -N char-word-crf-conll2003-demo-iobes-adam
+#PBS -N char-word-crf-conll2003-demo-cnn
 #PBS -l walltime=2:00:00
 #PBS -l nodes=1:ppn=1:gpus=1:default
 #PBS -l mem=40GB
@@ -11,24 +11,29 @@ module load python/2.7 cuda/8.0.44
 source activate merge
 
 python -u main.py \
---BATCH_SIZE=128 --FREQ_EVAL=0 \
---TAG_SCHEME=iobes \
---CHAR_INPUT_DIM=30 \
---CHAR_HIDDEN_DIM=300 \
--w=300 -W=300 \
--P=../embeddings/glove/glove.840B.300d.txt \
---DROPPUT_OUT=0.5 \
---RANDOM_SEED=42 \
---USE_CRF_LOSS=True \
 --TRAIN_FILE_PATH=../NER/conll2003/eng.train \
 --VAL_FILE_PATH=../NER/conll2003/eng.testa \
 --TEST_FILE_PATH=../NER/conll2003/eng.testb \
+--TAG_SCHEME=iob \
+--CHAR_INPUT_DIM=25 \
+--CHAR_HIDDEN_DIM=50 \
+-w=300 -W=300 \
+-P=../embeddings/glove/glove.840B.300d.txt \
+--BATCH_SIZE=128 \
+--DROPPUT_OUT=0.3 \
+--RANDOM_SEED=42 \
+--USE_CRF_LOSS=True \
 --CHAR_ATTENTION=False \
 --PATIENCES=10 \
 -L=adam \
 --LEARNING_RATE=0.001 \
---CLIP_NORM=0 \
---MOMENTUM=0.9
+--CLIP_NORM=5.0 \
+--MOMENTUM=0.9 \
+--WORD_LOWER=True \
+--INSERT_SINGLETON=True \
+--CHAR_ENCODE=cnn \
+--FILTER_SIZE=3 \
+--NUM_FILTERS=20 \
 
 # -P=../glove.6B.100d.txt \
 # -P=../embeddings/glove/glove.840B.300d.txt \
