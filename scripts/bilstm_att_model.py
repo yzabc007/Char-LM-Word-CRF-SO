@@ -161,9 +161,6 @@ class bilstm(object):
 
         return logits
 
-
-
-
     def _char_attention_layer(self, embedded_words, char_hiddens, word_lengths):
         # embedded_words: (batch_size, max_sent, word_dim)
         # char_hiddens: (batch_size, max_sent, max_char, char_dim)

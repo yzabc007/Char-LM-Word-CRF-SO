@@ -46,7 +46,7 @@ class bilstm(object):
         with tf.variable_scope('char_embedding') as vs:
             drange = np.sqrt(6. / (np.sum([self.char_vocab_size-1, self.char_input_dim])))
             char_initializer = tf.concat([tf.zeros([1, self.char_input_dim]),
-                                         tf.random_uniform([self.char_vocab_size-1, self.char_input_dim], -drange, drange)],
+                                         tf.random_uniform([self.char_vocab_size-1, self.char_input_dim], -0.25, 0.25)],
                                          axis=0)
             W_char = tf.Variable(char_initializer,
                                  trainable=True,
@@ -104,6 +104,46 @@ class bilstm(object):
             print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
 
         return char_output, char_hiddens
+
+    def _char_cnn(self, embedded_chars):
+        with tf.variable_scope('char_cnn') as vs:
+            s = tf.shape(embedded_chars)
+            new_cnn_embedded_chars = tf.reshape(embedded_chars, shape=[s[0]*s[1], s[2], self.char_input_dim])
+            # (batch_size*max_sent_len, max_char_len, char_input_dim)
+
+            filter_shape = [self.params['filter_size'], self.char_input_dim, self.params['num_filters']]
+            W_filter = tf.get_variable("filter_W",
+                                       shape=filter_shape,
+                                       initializer=tf.contrib.layers.xavier_initializer())
+
+            # input: [batch, in_width, in_channels]
+            # filter: [filter_width, in_channels, out_channels]
+            conv = tf.nn.conv1d(new_cnn_embedded_chars,
+                                W_filter,
+                                stride=1,
+                                padding="SAME",
+                                name='conv1')
+            # (batch_size*max_sent_len, out_width, num_filters)
+            # print 'conv: ', conv.get_shape()
+
+            h_expand = tf.expand_dims(conv, -1)
+            print 'h_expand: ', h_expand.get_shape()
+            # (batch_size*max_sent_len, out_width, num_filters, 1)
+
+            h_pooled = tf.nn.max_pool(h_expand,
+                                      ksize=[1, self.params['max_char_len'], 1, 1],
+                                      strides=[1, self.params['max_char_len'], 1, 1],
+                                      padding="SAME",
+                                      name='pooled')
+            print 'pooled: ', h_pooled.get_shape()
+            # (batch_size*max_sent_len, num_filters, 1)
+
+            char_pool_flat = tf.reshape(h_pooled, [s[0], s[1], self.params['num_filters']])
+            # (batch_size, max_sent, num_filters)
+
+            print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
+
+        return char_pool_flat
 
     def _word_lstm(self, embedded_words, sequence_lengths):
         with tf.variable_scope('word_bilstm') as vs:
@@ -182,7 +222,11 @@ class bilstm(object):
             embedded_chars = tf.nn.dropout(embedded_chars, self.dropout_keep_prob)
         self.max_char_len = tf.shape(embedded_chars)[2]
 
-        char_output, char_hiddens = self._char_lstm(embedded_chars, self.word_lengths)
+        if self.params['char_encode'] == 'lstm':
+            char_output, char_hiddens = self._char_lstm(embedded_chars, self.word_lengths)
+        elif self.params['char_encode'] == 'cnn':
+            char_output = self._char_cnn(embedded_chars)
+
         word_lstm_input = tf.concat([embedded_words, char_output], axis=-1)
 
         # if self.params['dropout']:

@@ -31,10 +31,10 @@ def Config():
     parser.add_argument('-c', '--CHAR_INPUT_DIM', type=int, default=0, help='char embedding dimension')
     parser.add_argument('-C', '--CHAR_HIDDEN_DIM', type=int, default=0, help='char hidden dimension')
     parser.add_argument('-B', '--CHAR_BIDIRECT', type='bool', default=True, help='whether to use char bidirect lstm')
-    parser.add_argument('--NUM_LAYERS', type=int, default=1, help='number of layers of rnn')
+    parser.add_argument('--NUM_RNN_LAYERS', type=int, default=1, help='number of layers of rnn')
     # CNN parameters
-    parser.add_argument('-i', '--FILTER_SIZE', type=int, default=0, help='filter for cov1d')
-    parser.add_argument('-I', '--NUM_FILTERS', type=int, default=0, help='num of filters')
+    parser.add_argument('-i', '--FILTER_SIZE', type=int, default=3, help='filter for cov1d')
+    parser.add_argument('-I', '--NUM_FILTERS', type=int, default=20, help='num of filters')
     #optimizer parameters
     parser.add_argument('-l', '--LEARNING_RATE', type=float, default=0.001, help='learning rate')
     parser.add_argument('-L', '--LEARNING_METHOD', type=str, default='sgd', help='learning method')
@@ -43,7 +43,7 @@ def Config():
     parser.add_argument('-r', '--DROPPUT_OUT', type=float, default=0, help='droup out')
     parser.add_argument('--MOMENTUM', type=float, default=0.9)
     # training parameters
-    parser.add_argument('-o', '--TRAIN_EPOCHS', type=int, default=100, help='training epoch')
+    parser.add_argument('-o', '--TRAIN_EPOCHS', type=int, default=1000, help='training epoch')
     parser.add_argument('-g', '--BATCH_SIZE', type=int, default=2, help='batch size')
     parser.add_argument('-q', '--FREQ_EVAL', type=int, default=10, help='frequency of evaluating on val+test set')
     parser.add_argument('-S', '--SAVE_MODEL_PATH', type=str, default='', help='the path to store best model')
@@ -53,6 +53,7 @@ def Config():
     parser.add_argument('--SAVE_PREDICT_PATH', type=str, default='')
     parser.add_argument('--SAVED_EPOCH', type=str, default='0', help='saved epoch')
     parser.add_argument('--WORD_LOWER', type='bool', default=True)
+    parser.add_argument('--INSERT_SINGLETONS', type='bool', default=False)
 
     # model selection parameters
     parser.add_argument('-s', '--CHAR_SUPER', type='bool', default=False, help='whether to use char supervision or not')
@@ -83,16 +84,16 @@ def Config():
     parser.add_argument('--ADD_KEYWORDS', type='bool', default=False, help='add keywords loss')
     parser.add_argument('--KEYWORD_LAMBDA', type=float, default=1, help='keyword lambda')
     parser.add_argument('--USE_HIER_CHAR_LM', type='bool', default=False, help='use hierarchy character lm model')
-    parser.add_argument('--LM_LAMBDA', type=float, default=1.0)
+    # parser.add_argument('--LM_LAMBDA', type=float, default=1.0)
     parser.add_argument('--CHAR_ATTENTION', type='bool', default=False)
+    parser.add_argument('--CHAR_ENCODE', type=str, default='lstm', help='encoding character: lstm or cnn or None')
     args = parser.parse_args()
 
     print 'args: ', args
 
     # store parameters
     Model_Parameters = OrderedDict()
-    Model_Parameters['lm_lambda'] = args.LM_LAMBDA
-
+    # Model_Parameters['lm_lambda'] = args.LM_LAMBDA
     Model_Parameters['train_file_path'] = args.TRAIN_FILE_PATH
     Model_Parameters['val_file_path'] = args.VAL_FILE_PATH
     Model_Parameters['test_file_path'] = args.TEST_FILE_PATH
@@ -102,7 +103,7 @@ def Config():
     Model_Parameters['total_set_path'] = args.TOTAL_SET_PATH
     Model_Parameters['tag_scheme'] = args.TAG_SCHEME
 
-    Model_Parameters['num_layers'] = args.NUM_LAYERS
+    Model_Parameters['num_layers'] = args.NUM_RNN_LAYERS
     Model_Parameters['pre_trained_path'] = args.PRE_TRAINED_PATH
     Model_Parameters['word_input_dim'] = args.WORD_INPUT_DIM
     Model_Parameters['word_hidden_dim'] = args.WORD_HIDDEN_DIM
@@ -136,8 +137,8 @@ def Config():
     Model_Parameters['word_bidirect'] = args.WORD_BIDIRECT
     Model_Parameters['char_bidirect'] = args.CHAR_BIDIRECT
     Model_Parameters['use_word2vec'] = (args.PRE_TRAINED_PATH != '')
-    Model_Parameters['use_char_lstm'] = (args.CHAR_HIDDEN_DIM != 0)
-    Model_Parameters['use_char_cnn'] = (args.FILTER_SIZE != 0)
+    # Model_Parameters['use_char_lstm'] = (args.CHAR_HIDDEN_DIM != 0)
+    # Model_Parameters['use_char_cnn'] = (args.FILTER_SIZE != 0)
     Model_Parameters['add_char_super'] = args.CHAR_SUPER
     Model_Parameters['use_hierarchy_lstm'] = args.HIERAR_BILSTM
     Model_Parameters['two_level_char_tag'] = args.TWO_LEVEL_CHAR_TAG
@@ -156,23 +157,23 @@ def Config():
     Model_Parameters['start'] = '#<s>#'
     Model_Parameters['end'] = '#<e>#'
     Model_Parameters['unk'] = '<UNK>'
-    Model_Parameters['nl_placeholder'] = '#<nl_placeholder>#'
-    Model_Parameters['pl_placeholder'] = '#<pl_placeholder>#'
+    # Model_Parameters['nl_placeholder'] = '#<nl_placeholder>#'
+    # Model_Parameters['pl_placeholder'] = '#<pl_placeholder>#'
     Model_Parameters['output_dir'] = args.OUTPUT_DIR
-    Model_Parameters['lm_mode'] = args.LM_MODE
-    Model_Parameters['nl_freq'] = args.NL_FREQ
-    Model_Parameters['pl_freq'] = args.PL_FREQ
-    Model_Parameters['nl_cof'] = args.NL_COF
-    Model_Parameters['pl_cof'] = args.PL_COF
+    # Model_Parameters['lm_mode'] = args.LM_MODE
+    # Model_Parameters['nl_freq'] = args.NL_FREQ
+    # Model_Parameters['pl_freq'] = args.PL_FREQ
+    # Model_Parameters['nl_cof'] = args.NL_COF
+    # Model_Parameters['pl_cof'] = args.PL_COF
     Model_Parameters['fig_name'] = args.FIG_NAME
     Model_Parameters['fig_path'] = args.FIG_PATH
     Model_Parameters['patiences'] = args.PATIENCES
-    Model_Parameters['vertical_connect'] = args.VERTICAL_CONNECT
-    Model_Parameters['placeholder_train'] = args.PLACEHOLDER_TRAIN
-    Model_Parameters['add_pl_prior'] = args.ADD_PL_PRIOR
-    Model_Parameters['prior_lambda'] = args.PRIOR_LAMBDA
-    Model_Parameters['add_keywords'] = args.ADD_KEYWORDS
-    Model_Parameters['keyword_lambda'] = args.KEYWORD_LAMBDA
+    # Model_Parameters['vertical_connect'] = args.VERTICAL_CONNECT
+    # Model_Parameters['placeholder_train'] = args.PLACEHOLDER_TRAIN
+    # Model_Parameters['add_pl_prior'] = args.ADD_PL_PRIOR
+    # Model_Parameters['prior_lambda'] = args.PRIOR_LAMBDA
+    # Model_Parameters['add_keywords'] = args.ADD_KEYWORDS
+    # Model_Parameters['keyword_lambda'] = args.KEYWORD_LAMBDA
     Model_Parameters['my_test_file_path'] = args.MY_TEST_FILE_PATH
     Model_Parameters['save_predict_path'] = args.SAVE_PREDICT_PATH
     if Model_Parameters['save_predict_path'] and not os.path.exists(Model_Parameters['save_predict_path']):
@@ -182,4 +183,6 @@ def Config():
     Model_Parameters['use_hier_char_lm'] = args.USE_HIER_CHAR_LM
     Model_Parameters['char_attention'] = args.CHAR_ATTENTION
     Model_Parameters['word_lower'] = args.WORD_LOWER
+    Model_Parameters['insert_singletons'] = args.INSERT_SINGLETONS
+    Model_Parameters['char_encode'] = args.CHAR_ENCODE
     return Model_Parameters

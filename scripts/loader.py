@@ -93,7 +93,7 @@ def word_mapping_glove(sents, Model_Parameters):
         with open(embed_filename_) as f:
             for idx, line in enumerate(f):
                 L = line.split()
-                word = L[0]
+                word = L[0].lower()
                 if word in vocab_:
                     word_vecs_[word] = np.array(L[1::], dtype=np.float32)
                     assert(len(word_vecs_[word]) == input_dim)

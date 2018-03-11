@@ -84,184 +84,180 @@ def get_feed_dict(model, Model_Parameters, sents_idx_data):
         feed_dict[model.char_lm_forward] = batch_char_lm_for
         feed_dict[model.char_lm_backward] = batch_char_lm_bak
 
-    elif Model_Parameters['use_char_alone_model']:
-        chars_batch = []
-        char_tags_batch = []
-        tags_batch = []
-        words_batch = []
-
-        for sent_data in sents_idx_data:
-            chars_batch.append(sent_data['char_ids'])
-            tags_batch.append(sent_data['tag_ids'])
-            char_tags_batch.append(sent_data['char_tag_ids'])
-            # words_batch.append(sent_data['word_for_char'])
-
-        tags_batch = pad_tags(tags_batch)
-        char_id_batch, char_lengths = pad_characters_alone(chars_batch)
-        char_tags_batch, _ = pad_characters_alone(char_tags_batch, tag=True)
-        # words_batch, _ = pad_characters_alone(words_batch)
-
-        feed_dict[model.dropout_keep_prob] = Model_Parameters['dropout']
-        feed_dict[model.char_input_ids] = char_id_batch
-        feed_dict[model.sequence_lengths] = char_lengths
-        feed_dict[model.tag_input_ids] = char_tags_batch
-
-        # feed_dict[model.word_input_ids] = words_batch
-        # feed_dict[model.space_pos] = space_positions
-        # feed_dict[model.word_tag_input_ids] = tags_batch
-        
-    elif Model_Parameters['lm_mode']:
-        sents_batch = []
-        tags_batch = []
-        chars_batch = []
-        char_tags_batch = []
-        pl_for_sents_batch = []
-        pl_bak_sents_batch = []
-        nl_for_sents_batch = []
-        nl_bak_sents_batch = []
-        nl_sequence_pos_batch = []
-        nl_sequence_idx_batch = []
-        nl_pl_placeholder_idx_batch = []
-        pl_sequence_pos_batch = []
-        pl_sequence_idx_batch = []
-        pl_nl_placeholder_idx_batch = []
-        for sent_data in sents_idx_data:
-            sents_batch.append(sent_data['word_ids'])
-            tags_batch.append(sent_data['tag_ids'])
-            chars_batch.append(sent_data['char_ids'])
-            if Model_Parameters['lm_mode'] == 'pl' or Model_Parameters['lm_mode'] == 'both':
-                pl_for_sents_batch.append(sent_data['pl_forward_words'])
-                pl_bak_sents_batch.append(sent_data['pl_backward_words'])
-                nl_sequence_pos_batch.append(sent_data['nl_sequence_pos'])
-                nl_sequence_idx_batch.append(sent_data['nl_sequence_idx'])
-                nl_pl_placeholder_idx_batch.append(sent_data['nl_pl_placeholder_idx'])
-            if Model_Parameters['lm_mode'] == 'nl' or Model_Parameters['lm_mode'] == 'both':
-                nl_for_sents_batch.append(sent_data['nl_forward_words'])
-                nl_bak_sents_batch.append(sent_data['nl_backward_words'])
-                pl_sequence_pos_batch.append(sent_data['pl_sequence_pos'])
-                pl_sequence_idx_batch.append(sent_data['pl_sequence_idx'])
-                pl_nl_placeholder_idx_batch.append(sent_data['pl_nl_placeholder_idx'])
-
-        feed_dict[model.dropout_keep_prob] = Model_Parameters['dropout']
-
-        sents_batch, seq_length = pad_sentence_words(sents_batch)
-        tags_batch = pad_tags(tags_batch)
-        feed_dict[model.word_input_ids] = sents_batch
-        feed_dict[model.tag_input_ids] = tags_batch
-        feed_dict[model.sequence_lengths] = seq_length
-
-        char_id_batch, word_lengths = pad_word_chars(chars_batch)
-        feed_dict[model.char_input_ids] = char_id_batch
-        feed_dict[model.word_lengths] = word_lengths
-
-        def pad_positions(sents):
-            max_sent_len = max([len(sent) for sent in sents])
-            batch_sents = []
-            batch_seq_length = []
-            for idx, sent in enumerate(sents):
-                batch_seq_length.append(len(sent))
-                cur_sent = sent + [0] * (max_sent_len - len(sent))
-                batch_sents.append([[idx, pos] for pos in cur_sent])
-            return batch_sents, batch_seq_length
-
-        def pad_placeholder(placeholder_lengths, type):
-            placeholders = []
-            max_len = max(placeholder_lengths)
-            for length in placeholder_lengths:
-                if type == 'pl':
-                    placeholders.append([1] * length + [0] * (max_len - length))
-                elif type == 'nl':
-                    placeholders.append([2] * length + [0] * (max_len - length))
-            return placeholders
-
-        if Model_Parameters['lm_mode'] == 'pl' or Model_Parameters['lm_mode'] == 'both':
-            pl_for_sents_batch = pad_tags(pl_for_sents_batch)
-            pl_bak_sents_batch = pad_tags(pl_bak_sents_batch)
-            feed_dict[model.pl_forward_words] = pl_for_sents_batch
-            feed_dict[model.pl_backward_words] = pl_bak_sents_batch
-
-            pl_sequence_pos, pl_sequence_lengths = pad_positions(pl_sequence_pos_batch)
-            pl_sequence_idx, _ = pad_sentence_words(pl_sequence_idx_batch)
-            pl_nl_placeholders_idx, pl_nl_placeholder_lengths = pad_sentence_words(pl_nl_placeholder_idx_batch)
-            pl_nl_placeholder_pos = pad_placeholder(pl_nl_placeholder_lengths, 'pl')
-            feed_dict[model.pl_sequence_pos] = pl_sequence_pos
-            feed_dict[model.pl_sequence_idx] = pl_sequence_idx
-            feed_dict[model.pl_sequence_lengths] = pl_sequence_lengths
-            feed_dict[model.pl_nl_placeholder_pos] = pl_nl_placeholder_pos
-            feed_dict[model.pl_nl_placeholders_idx] = pl_nl_placeholders_idx
-            feed_dict[model.pl_nl_placeholder_lengths] = pl_nl_placeholder_lengths
-
-        if Model_Parameters['lm_mode'] == 'nl' or Model_Parameters['lm_mode'] == 'both':
-            nl_for_sents_batch = pad_tags(nl_for_sents_batch)
-            nl_bak_sents_batch = pad_tags(nl_bak_sents_batch)
-            feed_dict[model.nl_forward_words] = nl_for_sents_batch
-            feed_dict[model.nl_backward_words] = nl_bak_sents_batch
-
-            nl_sequence_pos, nl_sequence_lengths = pad_positions(nl_sequence_pos_batch)
-            nl_sequence_idx, _ = pad_sentence_words(nl_sequence_idx_batch)
-            nl_pl_placeholders_idx, nl_pl_placeholder_lengths = pad_sentence_words(nl_pl_placeholder_idx_batch)
-            nl_pl_placeholder_pos = pad_placeholder(nl_pl_placeholder_lengths, 'nl')
-            feed_dict[model.nl_sequence_pos] = nl_sequence_pos
-            feed_dict[model.nl_sequence_idx] = nl_sequence_idx
-            feed_dict[model.nl_sequence_lengths] = nl_sequence_lengths
-            feed_dict[model.nl_pl_placeholder_pos] = nl_pl_placeholder_pos
-            feed_dict[model.nl_pl_placeholders_idx] = nl_pl_placeholders_idx
-            feed_dict[model.nl_pl_placeholder_lengths] = nl_pl_placeholder_lengths
-
-    elif Model_Parameters['add_pl_prior']:
-        sents_batch = []
-        tags_batch = []
-        chars_batch = []
-        char_tags_batch = []
-        prior_batch = []
-        for sent_data in sents_idx_data:
-            sents_batch.append(sent_data['word_ids'])
-            tags_batch.append(sent_data['tag_ids'])
-            chars_batch.append(sent_data['char_ids'])
-            prior_batch.append(sent_data['pl_priors'])
-
-        sents_batch, seq_length = pad_sentence_words(sents_batch)
-        tags_batch = pad_tags(tags_batch)
-
-        feed_dict[model.word_input_ids] = sents_batch
-        feed_dict[model.tag_input_ids] = tags_batch
-        feed_dict[model.sequence_lengths] = seq_length
-        feed_dict[model.dropout_keep_prob] = Model_Parameters['dropout']
-
-        char_id_batch, word_lengths = pad_word_chars(chars_batch)
-        feed_dict[model.char_input_ids] = char_id_batch
-        feed_dict[model.word_lengths] = word_lengths
-
-        prior_batch, _ = pad_sentence_words(prior_batch, type='float')
-        feed_dict[model.prob_pl_value] = prior_batch
-
-    elif Model_Parameters['add_keywords']:
-        sents_batch = []
-        tags_batch = []
-        chars_batch = []
-        char_tags_batch = []
-        keywords_batch = []
-        for sent_data in sents_idx_data:
-            sents_batch.append(sent_data['word_ids'])
-            tags_batch.append(sent_data['tag_ids'])
-            chars_batch.append(sent_data['char_ids'])
-            keywords_batch.append(sent_data['keywords_label'])
-
-        sents_batch, seq_length = pad_sentence_words(sents_batch)
-        tags_batch = pad_tags(tags_batch)
-
-        feed_dict[model.word_input_ids] = sents_batch
-        feed_dict[model.tag_input_ids] = tags_batch
-        feed_dict[model.sequence_lengths] = seq_length
-        feed_dict[model.dropout_keep_prob] = Model_Parameters['dropout']
-
-        char_id_batch, word_lengths = pad_word_chars(chars_batch)
-        feed_dict[model.char_input_ids] = char_id_batch
-        feed_dict[model.word_lengths] = word_lengths
-
-        keywords_batch, _ = pad_sentence_words(keywords_batch, type='float')
-        feed_dict[model.keyword_labels] = keywords_batch
-
+    # elif Model_Parameters['use_char_alone_model']:
+    #     chars_batch = []
+    #     char_tags_batch = []
+    #     tags_batch = []
+    #     words_batch = []
+    #
+    #     for sent_data in sents_idx_data:
+    #         chars_batch.append(sent_data['char_ids'])
+    #         tags_batch.append(sent_data['tag_ids'])
+    #         char_tags_batch.append(sent_data['char_tag_ids'])
+    #         # words_batch.append(sent_data['word_for_char'])
+    #
+    #     tags_batch = pad_tags(tags_batch)
+    #     char_id_batch, char_lengths = pad_characters_alone(chars_batch)
+    #     char_tags_batch, _ = pad_characters_alone(char_tags_batch, tag=True)
+    #     # words_batch, _ = pad_characters_alone(words_batch)
+    #
+    #     feed_dict[model.dropout_keep_prob] = Model_Parameters['dropout']
+    #     feed_dict[model.char_input_ids] = char_id_batch
+    #     feed_dict[model.sequence_lengths] = char_lengths
+    #     feed_dict[model.tag_input_ids] = char_tags_batch
+    #
+    #     # feed_dict[model.word_input_ids] = words_batch
+    #     # feed_dict[model.space_pos] = space_positions
+    #     # feed_dict[model.word_tag_input_ids] = tags_batch
+    # elif Model_Parameters['lm_mode']:
+    #     sents_batch = []
+    #     tags_batch = []
+    #     chars_batch = []
+    #     char_tags_batch = []
+    #     pl_for_sents_batch = []
+    #     pl_bak_sents_batch = []
+    #     nl_for_sents_batch = []
+    #     nl_bak_sents_batch = []
+    #     nl_sequence_pos_batch = []
+    #     nl_sequence_idx_batch = []
+    #     nl_pl_placeholder_idx_batch = []
+    #     pl_sequence_pos_batch = []
+    #     pl_sequence_idx_batch = []
+    #     pl_nl_placeholder_idx_batch = []
+    #     for sent_data in sents_idx_data:
+    #         sents_batch.append(sent_data['word_ids'])
+    #         tags_batch.append(sent_data['tag_ids'])
+    #         chars_batch.append(sent_data['char_ids'])
+    #         if Model_Parameters['lm_mode'] == 'pl' or Model_Parameters['lm_mode'] == 'both':
+    #             pl_for_sents_batch.append(sent_data['pl_forward_words'])
+    #             pl_bak_sents_batch.append(sent_data['pl_backward_words'])
+    #             nl_sequence_pos_batch.append(sent_data['nl_sequence_pos'])
+    #             nl_sequence_idx_batch.append(sent_data['nl_sequence_idx'])
+    #             nl_pl_placeholder_idx_batch.append(sent_data['nl_pl_placeholder_idx'])
+    #         if Model_Parameters['lm_mode'] == 'nl' or Model_Parameters['lm_mode'] == 'both':
+    #             nl_for_sents_batch.append(sent_data['nl_forward_words'])
+    #             nl_bak_sents_batch.append(sent_data['nl_backward_words'])
+    #             pl_sequence_pos_batch.append(sent_data['pl_sequence_pos'])
+    #             pl_sequence_idx_batch.append(sent_data['pl_sequence_idx'])
+    #             pl_nl_placeholder_idx_batch.append(sent_data['pl_nl_placeholder_idx'])
+    #
+    #     feed_dict[model.dropout_keep_prob] = Model_Parameters['dropout']
+    #
+    #     sents_batch, seq_length = pad_sentence_words(sents_batch)
+    #     tags_batch = pad_tags(tags_batch)
+    #     feed_dict[model.word_input_ids] = sents_batch
+    #     feed_dict[model.tag_input_ids] = tags_batch
+    #     feed_dict[model.sequence_lengths] = seq_length
+    #
+    #     char_id_batch, word_lengths = pad_word_chars(chars_batch)
+    #     feed_dict[model.char_input_ids] = char_id_batch
+    #     feed_dict[model.word_lengths] = word_lengths
+    #
+    #     def pad_positions(sents):
+    #         max_sent_len = max([len(sent) for sent in sents])
+    #         batch_sents = []
+    #         batch_seq_length = []
+    #         for idx, sent in enumerate(sents):
+    #             batch_seq_length.append(len(sent))
+    #             cur_sent = sent + [0] * (max_sent_len - len(sent))
+    #             batch_sents.append([[idx, pos] for pos in cur_sent])
+    #         return batch_sents, batch_seq_length
+    #
+    #     def pad_placeholder(placeholder_lengths, type):
+    #         placeholders = []
+    #         max_len = max(placeholder_lengths)
+    #         for length in placeholder_lengths:
+    #             if type == 'pl':
+    #                 placeholders.append([1] * length + [0] * (max_len - length))
+    #             elif type == 'nl':
+    #                 placeholders.append([2] * length + [0] * (max_len - length))
+    #         return placeholders
+    #
+    #     if Model_Parameters['lm_mode'] == 'pl' or Model_Parameters['lm_mode'] == 'both':
+    #         pl_for_sents_batch = pad_tags(pl_for_sents_batch)
+    #         pl_bak_sents_batch = pad_tags(pl_bak_sents_batch)
+    #         feed_dict[model.pl_forward_words] = pl_for_sents_batch
+    #         feed_dict[model.pl_backward_words] = pl_bak_sents_batch
+    #
+    #         pl_sequence_pos, pl_sequence_lengths = pad_positions(pl_sequence_pos_batch)
+    #         pl_sequence_idx, _ = pad_sentence_words(pl_sequence_idx_batch)
+    #         pl_nl_placeholders_idx, pl_nl_placeholder_lengths = pad_sentence_words(pl_nl_placeholder_idx_batch)
+    #         pl_nl_placeholder_pos = pad_placeholder(pl_nl_placeholder_lengths, 'pl')
+    #         feed_dict[model.pl_sequence_pos] = pl_sequence_pos
+    #         feed_dict[model.pl_sequence_idx] = pl_sequence_idx
+    #         feed_dict[model.pl_sequence_lengths] = pl_sequence_lengths
+    #         feed_dict[model.pl_nl_placeholder_pos] = pl_nl_placeholder_pos
+    #         feed_dict[model.pl_nl_placeholders_idx] = pl_nl_placeholders_idx
+    #         feed_dict[model.pl_nl_placeholder_lengths] = pl_nl_placeholder_lengths
+    #
+    #     if Model_Parameters['lm_mode'] == 'nl' or Model_Parameters['lm_mode'] == 'both':
+    #         nl_for_sents_batch = pad_tags(nl_for_sents_batch)
+    #         nl_bak_sents_batch = pad_tags(nl_bak_sents_batch)
+    #         feed_dict[model.nl_forward_words] = nl_for_sents_batch
+    #         feed_dict[model.nl_backward_words] = nl_bak_sents_batch
+    #
+    #         nl_sequence_pos, nl_sequence_lengths = pad_positions(nl_sequence_pos_batch)
+    #         nl_sequence_idx, _ = pad_sentence_words(nl_sequence_idx_batch)
+    #         nl_pl_placeholders_idx, nl_pl_placeholder_lengths = pad_sentence_words(nl_pl_placeholder_idx_batch)
+    #         nl_pl_placeholder_pos = pad_placeholder(nl_pl_placeholder_lengths, 'nl')
+    #         feed_dict[model.nl_sequence_pos] = nl_sequence_pos
+    #         feed_dict[model.nl_sequence_idx] = nl_sequence_idx
+    #         feed_dict[model.nl_sequence_lengths] = nl_sequence_lengths
+    #         feed_dict[model.nl_pl_placeholder_pos] = nl_pl_placeholder_pos
+    #         feed_dict[model.nl_pl_placeholders_idx] = nl_pl_placeholders_idx
+    #         feed_dict[model.nl_pl_placeholder_lengths] = nl_pl_placeholder_lengths
+    # elif Model_Parameters['add_pl_prior']:
+    #     sents_batch = []
+    #     tags_batch = []
+    #     chars_batch = []
+    #     char_tags_batch = []
+    #     prior_batch = []
+    #     for sent_data in sents_idx_data:
+    #         sents_batch.append(sent_data['word_ids'])
+    #         tags_batch.append(sent_data['tag_ids'])
+    #         chars_batch.append(sent_data['char_ids'])
+    #         prior_batch.append(sent_data['pl_priors'])
+    #
+    #     sents_batch, seq_length = pad_sentence_words(sents_batch)
+    #     tags_batch = pad_tags(tags_batch)
+    #
+    #     feed_dict[model.word_input_ids] = sents_batch
+    #     feed_dict[model.tag_input_ids] = tags_batch
+    #     feed_dict[model.sequence_lengths] = seq_length
+    #     feed_dict[model.dropout_keep_prob] = Model_Parameters['dropout']
+    #
+    #     char_id_batch, word_lengths = pad_word_chars(chars_batch)
+    #     feed_dict[model.char_input_ids] = char_id_batch
+    #     feed_dict[model.word_lengths] = word_lengths
+    #
+    #     prior_batch, _ = pad_sentence_words(prior_batch, type='float')
+    #     feed_dict[model.prob_pl_value] = prior_batch
+    # elif Model_Parameters['add_keywords']:
+    #     sents_batch = []
+    #     tags_batch = []
+    #     chars_batch = []
+    #     char_tags_batch = []
+    #     keywords_batch = []
+    #     for sent_data in sents_idx_data:
+    #         sents_batch.append(sent_data['word_ids'])
+    #         tags_batch.append(sent_data['tag_ids'])
+    #         chars_batch.append(sent_data['char_ids'])
+    #         keywords_batch.append(sent_data['keywords_label'])
+    #
+    #     sents_batch, seq_length = pad_sentence_words(sents_batch)
+    #     tags_batch = pad_tags(tags_batch)
+    #
+    #     feed_dict[model.word_input_ids] = sents_batch
+    #     feed_dict[model.tag_input_ids] = tags_batch
+    #     feed_dict[model.sequence_lengths] = seq_length
+    #     feed_dict[model.dropout_keep_prob] = Model_Parameters['dropout']
+    #
+    #     char_id_batch, word_lengths = pad_word_chars(chars_batch)
+    #     feed_dict[model.char_input_ids] = char_id_batch
+    #     feed_dict[model.word_lengths] = word_lengths
+    #
+    #     keywords_batch, _ = pad_sentence_words(keywords_batch, type='float')
+    #     feed_dict[model.keyword_labels] = keywords_batch
     else:
         sents_batch = []
         tags_batch = []
@@ -270,7 +266,7 @@ def get_feed_dict(model, Model_Parameters, sents_idx_data):
         for sent_data in sents_idx_data:
             sents_batch.append(sent_data['word_ids'])
             tags_batch.append(sent_data['tag_ids'])
-            if Model_Parameters['use_char_lstm'] or Model_Parameters['use_char_cnn']:
+            if Model_Parameters['char_encode'] != 'None':
                 # cur_char = sent_data['char_ids'] + [[0]] * (max_sent_len - len(sent_data['word_ids']))
                 cur_char = sent_data['char_ids']
                 chars_batch.append(cur_char)
@@ -285,7 +281,7 @@ def get_feed_dict(model, Model_Parameters, sents_idx_data):
         feed_dict[model.sequence_lengths] = seq_length
         feed_dict[model.dropout_keep_prob] = Model_Parameters['dropout']
 
-        if Model_Parameters['use_char_lstm']:
+        if Model_Parameters['char_encode'] == 'lstm':
             char_id_batch, word_lengths = pad_word_chars(chars_batch)
             feed_dict[model.char_input_ids] = char_id_batch
             feed_dict[model.word_lengths] = word_lengths
@@ -293,15 +289,18 @@ def get_feed_dict(model, Model_Parameters, sents_idx_data):
                 char_tags_batch, _ = pad_word_chars(char_tags_batch)
                 feed_dict[model.tag_char_inputs_ids] = char_tags_batch
 
-        if Model_Parameters['use_char_cnn']:
-            sents_batch, seq_length = pad_sentence_words(sents_batch, Model_Parameters['max_sent_len'])
-            tags_batch = pad_tags(tags_batch, Model_Parameters['max_sent_len'])
+        if Model_Parameters['char_encode'] == 'cnn':
+            # sents_batch, seq_length = pad_sentence_words(sents_batch, Model_Parameters['max_sent_len'])
+            # tags_batch = pad_tags(tags_batch, Model_Parameters['max_sent_len'])
+            sents_batch, seq_length = pad_sentence_words(sents_batch)
+            tags_batch = pad_tags(tags_batch)
 
             feed_dict[model.word_input_ids] = sents_batch
             feed_dict[model.tag_input_ids] = tags_batch
             feed_dict[model.sequence_lengths] = seq_length
 
-            char_id_batch, word_lengths = pad_word_chars(chars_batch, Model_Parameters['max_sent_len'], Model_Parameters['max_char_len'])
+            # char_id_batch, word_lengths = pad_word_chars(chars_batch, Model_Parameters['max_sent_len'], Model_Parameters['max_char_len'])
+            char_id_batch, word_lengths = pad_word_chars(chars_batch, max_char_len=Model_Parameters['max_char_len'])
             feed_dict[model.char_input_ids] = char_id_batch
             feed_dict[model.word_lengths] = word_lengths
 
