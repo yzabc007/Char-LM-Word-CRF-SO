@@ -143,6 +143,7 @@ def word_mapping_glove(sents, Model_Parameters):
     )
     return vocab, word_to_id, id_to_word, W
 
+
 def word_mapping_random(sents):
     words = [x[0] for sent in sents for x in sent]
     vocab = Counter(words)
@@ -150,7 +151,6 @@ def word_mapping_random(sents):
     sorted_vocab = vocab.most_common()
     word_to_id = {x[0]: idx for idx, x in enumerate(sorted_vocab)}
     id_to_word = {v: k for k, v in word_to_id.items()}
-
     print 'Find %i unique words on training set (%i in total).' % (
         len(word_to_id), len(words))
     return vocab, word_to_id, id_to_word
@@ -161,7 +161,6 @@ def tag_mapping(sents):
     tag_vocab = Counter(tags).most_common()
     tag_to_id = {x[0]: idx for idx, x in enumerate(tag_vocab)}
     id_to_tag = {v: k for k, v in tag_to_id.items()}
-
     print 'Find %i tags.' % (len(tag_to_id))
     return tag_vocab, tag_to_id, id_to_tag
 
@@ -177,7 +176,6 @@ def char_mapping(sents):
     id_to_char = {v: k for k, v in char_to_id.items()}
     assert(' ' in char_to_id)
     # print '!!!!!!!', char_to_id[' ']
-
     print 'Find %i character.' % (len(char_to_id))
     return char_vocab, char_to_id, id_to_char
 
@@ -188,58 +186,15 @@ def lm_vocab_mapping(Model_Parameters, tags_vocab):
     word_to_id[Model_Parameters['start']] = len(word_to_id) # 10000
     word_to_id[Model_Parameters['end']] = len(word_to_id) # 10001
     word_to_id[Model_Parameters['unk']] = len(word_to_id) # 10002
-    word_to_id[Model_Parameters['nl_placeholder']] = len(word_to_id) # 10003
-    word_to_id[Model_Parameters['pl_placeholder']] = len(word_to_id) # 10004
     id_to_word = {v:k for k, v in word_to_id.items()}
     return word_to_id, id_to_word
-
-
-def make_idx_data_lm(Model_Parameters, sents, word_to_id, tag_to_id, char_to_id, lm_word_to_id):
-    def f(x): return x if Model_Parameters['word_lower'] else x
-    data = []
-    for sent in sents:
-        cur_sent_dict = {}
-        seq_words = [w[0] for w in sent]
-        word_ids = [word_to_id[f(w) if f(w) in word_to_id else Model_Parameters['unk']] for w in seq_words]
-        tag_ids = [tag_to_id[w[-1]] for w in sent]
-
-        assert(len(word_ids) == len(tag_ids))
-        cur_sent_dict['seq_words'] = seq_words
-        cur_sent_dict['word_ids'] = word_ids
-        cur_sent_dict['tag_ids'] = tag_ids
-
-        char_ids = [[char_to_id[c] for c in w if c in char_to_id] for w in seq_words]
-        cur_sent_dict['char_ids'] = char_ids
-
-        next_words = seq_words[1::] + [Model_Parameters['end']]
-        prev_words = [Model_Parameters['start']] + seq_words[:-1]
-        cur_sent_dict['forward_words'] = [lm_word_to_id[w if w in lm_word_to_id else Model_Parameters['unk']] for w in next_words]
-        cur_sent_dict['backward_words'] = [lm_word_to_id[w if w in lm_word_to_id else Model_Parameters['unk']] for w in prev_words]
-
-        data.append(cur_sent_dict)
-    return data
-
-
-def extract_prior_dict(Model_Parameters, train_sents):
-    total_set = [word_tag[0] for sent in train_sents for word_tag in sent]
-    # nl_set = [word_tag[0] for sent in train_sents for word_tag in sent if word_tag[1]=='O']
-    pl_set = [word_tag[0] for sent in train_sents for word_tag in sent if word_tag[1]!='O']
-    total_counter = Counter(total_set)
-    # nl_counter = Counter(nl_set)
-    pl_counter = Counter(pl_set)
-    prior_dict = {}
-    prior_dict[Model_Parameters['unk']] = float(len(pl_counter)) / len(total_counter)
-    for token in total_counter.keys():
-        prior_dict[token] = float(pl_counter[token]) / total_counter[token] if token in pl_counter else 0.0
-
-    return prior_dict
 
 
 def insert_singletons(words, word_to_id, singletons, unk, lower, p=0.5):
     """
     Replace singletons by the unknown word with a probability p.
     """
-    def f(x): return x if lower else x
+    def f(x): return x.lower() if lower else x
     new_words = []
     for w in words:
         if w in singletons and np.random.uniform() < p:
@@ -249,37 +204,61 @@ def insert_singletons(words, word_to_id, singletons, unk, lower, p=0.5):
     return new_words
 
 
-def make_idx_data(Model_Parameters,
-                  sents,
-                  word_to_id,
-                  tag_to_id,
-                  char_to_id=None,
-                  singletons=None):
+def make_idx_data(Model_Parameters, sents, word_to_id, tag_to_id):
     '''
     convert strings to ids
     '''
-    def f(x): return x if Model_Parameters['word_lower'] else x
+    def f(x): return x.lower() if Model_Parameters['word_lower'] else x
     data = []
     for sent in sents:
         cur_sent_dict = {}
         seq_words = [w[0] for w in sent]
         if Model_Parameters['insert_singletons']:
+            singletons = Model_Parameters['singletons']
             word_ids = insert_singletons(seq_words, word_to_id, singletons, Model_Parameters['unk'], Model_Parameters['word_lower'] )
         else:
             word_ids = [word_to_id[f(w) if f(w) in word_to_id else Model_Parameters['unk']] for w in seq_words]
         tag_ids = [tag_to_id[w[-1]] for w in sent]
         assert(len(word_ids) == len(tag_ids))
-
+        # basic inputs, word id, sent lenght, tag id
         cur_sent_dict['seq_words'] = seq_words
         cur_sent_dict['word_ids'] = word_ids
         cur_sent_dict['tag_ids'] = tag_ids
 
-        if char_to_id:
+        # add char id
+        if Model_Parameters['char_encode'] != 'None' and not Model_Parameters['use_hier_char']:
             char_ids = []
+            char_to_id = Model_Parameters['char_to_id']
             for idx, word in enumerate(seq_words):
                 cur_chars = [char_to_id[c if c in char_to_id else '<UNK>'] for c in word]
                 char_ids.append(cur_chars)
+
             cur_sent_dict['char_ids'] = char_ids
+        elif Model_Parameters['use_hier_char']:
+            # add one extra space character for each word
+            char_ids = []
+            char_to_id = Model_Parameters['char_to_id']
+            for idx, word in enumerate(seq_words):
+                if idx != len(seq_words) - 1:
+                    cur_chars = [char_to_id[c if c in char_to_id else '<UNK>'] for c in word] + [char_to_id[' ']]
+                else:
+                    cur_chars = [char_to_id[c if c in char_to_id else '<UNK>'] for c in word]
+                char_ids.append(cur_chars)
+
+            cur_sent_dict['char_ids'] = char_ids
+            # add char lm inputs, next/previous char, only valid when using hier_char model
+            if Model_Parameters['char_lm']:
+                flat_char_ids = [c for sent in char_ids for c in sent]
+                cur_sent_dict['char_lm_forward'] = flat_char_ids[1:] + [char_to_id['</s>']]
+                cur_sent_dict['char_lm_backward'] = [char_to_id['<s>']] + flat_char_ids[:-1]
+
+        if Model_Parameters['word_lm']:
+            next_words = seq_words[1::] + [Model_Parameters['end']]
+            prev_words = [Model_Parameters['start']] + seq_words[:-1]
+            cur_sent_dict['forward_words'] = [lm_word_to_id[w if w in lm_word_to_id else Model_Parameters['unk']] for w
+                                              in next_words]
+            cur_sent_dict['backward_words'] = [lm_word_to_id[w if w in lm_word_to_id else Model_Parameters['unk']] for w
+                                               in prev_words]
 
         data.append(cur_sent_dict)
     return data

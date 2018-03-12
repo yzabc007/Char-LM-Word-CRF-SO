@@ -83,17 +83,24 @@ def Config():
     parser.add_argument('--PRIOR_LAMBDA', type=float, default=1, help='factor for prior loss')
     parser.add_argument('--ADD_KEYWORDS', type='bool', default=False, help='add keywords loss')
     parser.add_argument('--KEYWORD_LAMBDA', type=float, default=1, help='keyword lambda')
-    parser.add_argument('--USE_HIER_CHAR_LM', type='bool', default=False, help='use hierarchy character lm model')
     # parser.add_argument('--LM_LAMBDA', type=float, default=1.0)
-    parser.add_argument('--CHAR_ATTENTION', type='bool', default=False)
     parser.add_argument('--CHAR_ENCODE', type=str, default='lstm', help='encoding character: lstm or cnn or None')
-    args = parser.parse_args()
 
+    # model selection parameters
+    parser.add_argument('--USE_HIER_CHAR_LM', type='bool', default=False, help='use hierarchy character lm model')
+    parser.add_argument('--USE_HIER_CHAR', type='bool', default=False, help='encode character in sentence level')
+    parser.add_argument('--CHAR_LM', type='bool', default=False, help='using character language model')
+    parser.add_argument('--WORD_LM', type='bool', default=False, help='using word language model')
+
+    parser.add_argument('--CHAR_ATTENTION', type='bool', default=False)
+
+    args = parser.parse_args()
     print 'args: ', args
 
     # store parameters
     Model_Parameters = OrderedDict()
     # Model_Parameters['lm_lambda'] = args.LM_LAMBDA
+    # I/O parameters
     Model_Parameters['train_file_path'] = args.TRAIN_FILE_PATH
     Model_Parameters['val_file_path'] = args.VAL_FILE_PATH
     Model_Parameters['test_file_path'] = args.TEST_FILE_PATH
@@ -102,7 +109,14 @@ def Config():
     Model_Parameters['test_size'] = args.TEST_SIZE
     Model_Parameters['total_set_path'] = args.TOTAL_SET_PATH
     Model_Parameters['tag_scheme'] = args.TAG_SCHEME
+    Model_Parameters['my_test_file_path'] = args.MY_TEST_FILE_PATH
+    Model_Parameters['save_predict_path'] = args.SAVE_PREDICT_PATH
+    if Model_Parameters['save_predict_path'] and not os.path.exists(Model_Parameters['save_predict_path']):
+        print Model_Parameters['save_predict_path']
+        os.makedirs(Model_Parameters['save_predict_path'])
+    Model_Parameters['saved_epoch'] = args.SAVED_EPOCH
 
+    # model parameters
     Model_Parameters['num_layers'] = args.NUM_RNN_LAYERS
     Model_Parameters['pre_trained_path'] = args.PRE_TRAINED_PATH
     Model_Parameters['word_input_dim'] = args.WORD_INPUT_DIM
@@ -119,35 +133,42 @@ def Config():
     Model_Parameters['vocab_size'] = 0
     Model_Parameters['tag_size'] = 0
     Model_Parameters['char_vocab_size'] = 0
+    Model_Parameters['char_tag_size'] = 0
     Model_Parameters['filter_size'] = args.FILTER_SIZE
     Model_Parameters['num_filters'] = args.NUM_FILTERS
     Model_Parameters['max_sent_len'] = 0
     Model_Parameters['max_char_len'] = 0
     Model_Parameters['dropout'] = args.DROPPUT_OUT
+    Model_Parameters['char_encode'] = args.CHAR_ENCODE
+
+    # training parameters
     Model_Parameters['train_epochs'] = args.TRAIN_EPOCHS
     Model_Parameters['freq_eval'] = args.FREQ_EVAL
-    Model_Parameters['char_tag_size'] = 0
     Model_Parameters['save_model_path'] = args.SAVE_MODEL_PATH
     if Model_Parameters['save_model_path'] and not os.path.exists(Model_Parameters['save_model_path']):
         os.makedirs(Model_Parameters['save_model_path'])
     Model_Parameters['restore_mode_path'] = args.RESTORE_MODEL_PATH
     Model_Parameters['random_seed'] = args.RANDOM_SEED
+    Model_Parameters['patiences'] = args.PATIENCES
+    Model_Parameters['word_lower'] = args.WORD_LOWER
+    Model_Parameters['insert_singletons'] = args.INSERT_SINGLETONS
 
     # boolean parameters
-    Model_Parameters['word_bidirect'] = args.WORD_BIDIRECT
-    Model_Parameters['char_bidirect'] = args.CHAR_BIDIRECT
+    # Model_Parameters['word_bidirect'] = args.WORD_BIDIRECT
+    # Model_Parameters['char_bidirect'] = args.CHAR_BIDIRECT
     Model_Parameters['use_word2vec'] = (args.PRE_TRAINED_PATH != '')
     # Model_Parameters['use_char_lstm'] = (args.CHAR_HIDDEN_DIM != 0)
     # Model_Parameters['use_char_cnn'] = (args.FILTER_SIZE != 0)
     Model_Parameters['add_char_super'] = args.CHAR_SUPER
     Model_Parameters['use_hierarchy_lstm'] = args.HIERAR_BILSTM
-    Model_Parameters['two_level_char_tag'] = args.TWO_LEVEL_CHAR_TAG
+    # Model_Parameters['two_level_char_tag'] = args.TWO_LEVEL_CHAR_TAG
     Model_Parameters['connection_method'] = args.CONNECTIONS
     Model_Parameters['train_order'] = args.TRAIN_ORDER
-    Model_Parameters['use_char_alone_model'] = args.CHAR_ALONE_MODEL
+    # Model_Parameters['use_char_alone_model'] = args.CHAR_ALONE_MODEL
     Model_Parameters['use_word_inputs'] = args.USE_WORD_INPUTS
     Model_Parameters['flag_saving'] = args.FLAG_SAVING
-    Model_Parameters['frozen'] = args.FROZEN
+    # Model_Parameters['frozen'] = args.FROZEN
+
     Model_Parameters['test_only'] = args.TEST_ONLY
     Model_Parameters['id_to_word_tag'] = {}
     Model_Parameters['id_to_char_tag'] = {}
@@ -167,22 +188,16 @@ def Config():
     # Model_Parameters['pl_cof'] = args.PL_COF
     Model_Parameters['fig_name'] = args.FIG_NAME
     Model_Parameters['fig_path'] = args.FIG_PATH
-    Model_Parameters['patiences'] = args.PATIENCES
     # Model_Parameters['vertical_connect'] = args.VERTICAL_CONNECT
     # Model_Parameters['placeholder_train'] = args.PLACEHOLDER_TRAIN
     # Model_Parameters['add_pl_prior'] = args.ADD_PL_PRIOR
     # Model_Parameters['prior_lambda'] = args.PRIOR_LAMBDA
     # Model_Parameters['add_keywords'] = args.ADD_KEYWORDS
     # Model_Parameters['keyword_lambda'] = args.KEYWORD_LAMBDA
-    Model_Parameters['my_test_file_path'] = args.MY_TEST_FILE_PATH
-    Model_Parameters['save_predict_path'] = args.SAVE_PREDICT_PATH
-    if Model_Parameters['save_predict_path'] and not os.path.exists(Model_Parameters['save_predict_path']):
-        print Model_Parameters['save_predict_path']
-        os.makedirs(Model_Parameters['save_predict_path'])
-    Model_Parameters['saved_epoch'] = args.SAVED_EPOCH
     Model_Parameters['use_hier_char_lm'] = args.USE_HIER_CHAR_LM
     Model_Parameters['char_attention'] = args.CHAR_ATTENTION
-    Model_Parameters['word_lower'] = args.WORD_LOWER
-    Model_Parameters['insert_singletons'] = args.INSERT_SINGLETONS
-    Model_Parameters['char_encode'] = args.CHAR_ENCODE
+    Model_Parameters['use_hier_char'] = args.USE_HIER_CHAR
+    Model_Parameters['word_lm'] = args.WORD_LM
+    Model_Parameters['char_lm'] = args.CHAR_LM
+
     return Model_Parameters

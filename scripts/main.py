@@ -8,6 +8,7 @@ import cPickle
 
 import tensorflow as tf
 from bilstm_model import *
+from hier_bilstm_model import *
 from utils import *
 from loader import *
 from conlleval_py import *
@@ -70,7 +71,7 @@ def main():
         print 'Begin mapping from random ...'
         dic_words, word_to_id, id_to_word = word_mapping_random(train_sents)
     Model_Parameters['vocab_size'] = len(word_to_id)
-    singletons = set([w[0] for w in dic_words.items() if w[1] == 1])
+    Model_Parameters['singletons'] = set([w[0] for w in dic_words.items() if w[1] == 1])
     print 'Word mapped!'
 
     dic_tags, tag_to_id, id_to_tag = tag_mapping(train_sents)
@@ -82,20 +83,21 @@ def main():
     dic_chars, char_to_id, id_to_char = char_mapping(train_sents)
     # print char_to_id
     Model_Parameters['char_vocab_size'] = len(char_to_id)
+    Model_Parameters['char_to_id'] = char_to_id
     print 'Character mapped!'
     print 'Mapping finished!'
 
     # index data
-    train_idx_data = make_idx_data(Model_Parameters, train_sents, word_to_id,
-                                   tag_to_id, char_to_id=char_to_id, singletons=singletons)
-    val_idx_data = make_idx_data(Model_Parameters, val_sents, word_to_id,
-                                 tag_to_id, char_to_id=char_to_id, singletons=singletons)
-    test_idx_data = make_idx_data(Model_Parameters, test_sents, word_to_id,
-                                  tag_to_id, char_to_id=char_to_id, singletons=singletons)
+    train_idx_data = make_idx_data(Model_Parameters, train_sents, word_to_id, tag_to_id)
+    val_idx_data = make_idx_data(Model_Parameters, val_sents, word_to_id, tag_to_id)
+    test_idx_data = make_idx_data(Model_Parameters, test_sents, word_to_id, tag_to_id)
     print 'Finish digitizing!'
     print 'An example: ', train_idx_data[0]
 
-    model = bilstm(Model_Parameters)
+    if Model_Parameters['use_hier_char']:
+        model = hier_bilstm(Model_Parameters)
+    else:
+        model = bilstm(Model_Parameters)
 
     print 'Begin training ...'
     train(model, Model_Parameters, train_idx_data, val_idx_data, test_idx_data)
