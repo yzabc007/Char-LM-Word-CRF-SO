@@ -23,6 +23,7 @@ class bilstm(object):
         self.char_input_dim = self.params['char_input_dim']
         self.char_hidden_dim = self.params['char_hidden_dim']
         # self.char_bidirect = self.params['char_bidirect']
+        self.total_loss = 0
 
     def _word_embedding(self, word_input_ids):
         with tf.variable_scope('word_embedding') as vs:
@@ -178,7 +179,7 @@ class bilstm(object):
             word_biLSTM_output = tf.concat([output_seq_fw, output_seq_bw], axis=-1, name='BiLSTM')
             print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
 
-        return word_biLSTM_output
+        return word_biLSTM_output, output_seq_fw, output_seq_bw
 
     def _label_prediction(self, word_bilstm_output):
         with tf.variable_scope('output_layers') as vs:
@@ -225,6 +226,43 @@ class bilstm(object):
             print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
         return word_loss
 
+    def _word_lm(self, word_seq_fw, word_seq_bw):
+        lm_loss = 0
+        with tf.variable_scope('forward_lm') as vs:
+            W_forward = tf.get_variable('softmax_for_W',
+                                          shape=[self.word_hidden_dim, self.params['lm_vocab_size']],
+                                          initializer=tf.contrib.layers.xavier_initializer())
+            b_forward = tf.Variable(tf.constant(0.0, shape=[self.params['lm_vocab_size']]), name='softmax_for_b')
+            bilstm_for_reshape = tf.reshape(word_seq_fw, shape=[-1, self.word_hidden_dim])
+            pred_forward = tf.nn.xw_plus_b(bilstm_for_reshape, W_forward, b_forward, name='softmax_forward')
+            logits_forward = tf.reshape(pred_forward,
+                                        shape=[self.batch_size, self.max_sent_len, self.params['lm_vocab_size']],
+                                        name='logits_forward')
+            for_losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits_forward,
+                                                                        labels=self.forward_words)
+            forward_lm_loss = tf.reduce_mean(tf.boolean_mask(for_losses, tf.sequence_mask(self.sequence_lengths)))
+            lm_loss += forward_lm_loss
+
+            print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
+
+        with tf.variable_scope('backward_lm') as vs:
+            W_backward = tf.get_variable('softmax_bak_W',
+                                          shape=[self.word_hidden_dim, self.params['lm_vocab_size']],
+                                          initializer=tf.contrib.layers.xavier_initializer())
+            b_backward = tf.Variable(tf.constant(0.0, shape=[self.params['lm_vocab_size']]), name='softmax_bak_b')
+            bilstm_bak_reshape = tf.reshape(word_seq_bw, shape=[-1, self.word_hidden_dim])
+            pred_backward = tf.nn.xw_plus_b(bilstm_bak_reshape, W_backward, b_backward, name='softmax_backward')
+            logits_backward = tf.reshape(pred_backward,
+                                         shape=[self.batch_size, self.max_sent_len, self.params['lm_vocab_size']],
+                                         name='logits_backward')
+            bak_losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits_backward,
+                                                                        labels=self.backward_words)
+            backward_lm_loss = tf.reduce_mean(tf.boolean_mask(bak_losses, tf.sequence_mask(self.sequence_lengths)))
+            lm_loss += backward_lm_loss
+
+            print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
+
+        return lm_loss
 
     def build(self):
         # place holders
@@ -269,12 +307,18 @@ class bilstm(object):
         if self.params['dropout']:
             word_lstm_input = tf.nn.dropout(word_lstm_input, self.dropout_keep_prob)
         # word encoding
-        word_bilstm_output = self._word_lstm(word_lstm_input, self.sequence_lengths)
+        word_bilstm_output, word_seq_fw, word_seq_bw = self._word_lstm(word_lstm_input, self.sequence_lengths)
         # intermediate fc layers
         self.logits = self._label_prediction(word_bilstm_output)
         # calculate loss
         self.word_loss = self._loss_cal(self.logits)
-        self.total_loss = self.word_loss
+        self.total_loss += self.word_loss
+
+        if self.params['word_lm']:
+            self.forward_words = tf.placeholder(tf.int32, [None, None], name='forward_words')
+            self.backward_words = tf.placeholder(tf.int32, [None, None], name='backward_words')
+            self.word_lm_loss = self._word_lm(word_seq_fw, word_seq_bw)
+            self.total_loss += self.word_lm_loss
 
         # optimization
         if self.params['lr_method'].lower() == 'adam':

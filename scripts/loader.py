@@ -180,13 +180,18 @@ def char_mapping(sents):
     return char_vocab, char_to_id, id_to_char
 
 
-def lm_vocab_mapping(Model_Parameters, tags_vocab):
-    # dic_vw
-    word_to_id = {x: idx for idx, x in enumerate(tags_vocab)}
-    word_to_id[Model_Parameters['start']] = len(word_to_id) # 10000
-    word_to_id[Model_Parameters['end']] = len(word_to_id) # 10001
-    word_to_id[Model_Parameters['unk']] = len(word_to_id) # 10002
-    id_to_word = {v:k for k, v in word_to_id.items()}
+def lm_vocab_mapping(Model_Parameters, train_sents):
+    vocab = []
+    for sent in train_sents:
+        vocab += [x[0].lower() if Model_Parameters['word_lower'] else x[0] for x in sent]
+    sorted_vocab = Counter(vocab).most_common(Model_Parameters['lm_max_vocab'])
+    final_vocab = [x[0] for x in sorted_vocab]
+    word_to_id = {x: idx for idx, x in enumerate(final_vocab)}
+    word_to_id[Model_Parameters['start']] = len(word_to_id)
+    word_to_id[Model_Parameters['end']] = len(word_to_id)
+    word_to_id[Model_Parameters['unk']] = len(word_to_id)
+    id_to_word = {v: k for k, v in word_to_id.items()}
+
     return word_to_id, id_to_word
 
 
@@ -253,11 +258,12 @@ def make_idx_data(Model_Parameters, sents, word_to_id, tag_to_id):
                 cur_sent_dict['char_lm_backward'] = [char_to_id['<s>']] + flat_char_ids[:-1]
 
         if Model_Parameters['word_lm']:
+            lm_word_to_id = Model_Parameters['lm_word_to_id']
             next_words = seq_words[1::] + [Model_Parameters['end']]
             prev_words = [Model_Parameters['start']] + seq_words[:-1]
-            cur_sent_dict['forward_words'] = [lm_word_to_id[w if w in lm_word_to_id else Model_Parameters['unk']] for w
+            cur_sent_dict['forward_words'] = [lm_word_to_id[f(w) if f(w) in lm_word_to_id else Model_Parameters['unk']] for w
                                               in next_words]
-            cur_sent_dict['backward_words'] = [lm_word_to_id[w if w in lm_word_to_id else Model_Parameters['unk']] for w
+            cur_sent_dict['backward_words'] = [lm_word_to_id[f(w) if f(w) in lm_word_to_id else Model_Parameters['unk']] for w
                                                in prev_words]
 
         data.append(cur_sent_dict)

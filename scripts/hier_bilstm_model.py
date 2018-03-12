@@ -26,6 +26,8 @@ class hier_bilstm(object):
         self.char_hidden_dim = self.params['char_hidden_dim']
         # self.char_bidirect = self.params['char_bidirect']
 
+        self.total_loss = 0
+
     def _word_embedding(self, word_input_ids):
         with tf.variable_scope('word_embedding') as vs:
             if self.params['use_word2vec']:
@@ -83,7 +85,7 @@ class hier_bilstm(object):
             # print 'word_slice: ', word_slices.get_shape()
             print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
 
-        return word_slices
+        return word_slices, seq_fw, seq_bw
 
     def _word_lstm(self, embedded_words, sequence_lengths):
         with tf.variable_scope('word_bilstm') as vs:
@@ -162,6 +164,57 @@ class hier_bilstm(object):
             print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
         return word_loss
 
+    def _char_lm(self, char_seq_fw, char_seq_bw):
+        char_loss = 0
+        with tf.variable_scope('char_forward_lm') as vs:
+            char_for_inputs = char_seq_fw
+            char_for_inputs_reshape = tf.reshape(char_for_inputs, shape=[-1, self.char_hidden_dim])
+            W_for_fc1 = tf.get_variable('W_for_fc1',
+                                        shape=[self.char_hidden_dim, self.char_hidden_dim // 2],
+                                        initializer=tf.contrib.layers.xavier_initializer())
+            b_for_fc1 = tf.Variable(tf.constant(0.0, shape=[self.char_hidden_dim // 2]), name='b_for_fc1')
+            o_for_fc1 = tf.nn.relu(tf.nn.xw_plus_b(char_for_inputs_reshape, W_for_fc1, b_for_fc1), name='o_for_fc1')
+
+            W_char_for = tf.get_variable('softmax_char_for_W',
+                                         shape=[self.char_hidden_dim // 2, self.char_vocab_size],
+                                         initializer=tf.contrib.layers.xavier_initializer())
+            b_char_for = tf.Variable(tf.constant(0.0, shape=[self.char_vocab_size]), name='softmax_char_for_b')
+            char_pred_for = tf.nn.xw_plus_b(o_for_fc1, W_char_for, b_char_for, name='softmax_forward')
+
+            self.char_logits_for = tf.reshape(char_pred_for,
+                                              shape=[self.batch_size, self.max_char_len, self.char_vocab_size],
+                                              name='char_logits_for')
+
+            losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.char_logits_for,
+                                                                    labels=self.char_lm_forward)
+            self.char_for_lm_loss = tf.reduce_mean(tf.boolean_mask(losses, tf.sequence_mask(self.char_lengths)))
+            char_loss += self.char_for_lm_loss
+            print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
+
+        with tf.variable_scope('char_backward_lm') as vs:
+            char_bak_inputs = char_seq_bw
+            char_bak_inputs_reshape = tf.reshape(char_bak_inputs, shape=[-1, self.char_hidden_dim])
+            W_bak_fc1 = tf.get_variable('W_bak_fc1', shape=[self.char_hidden_dim, self.char_hidden_dim // 2],
+                                        initializer=tf.contrib.layers.xavier_initializer())
+            b_bak_fc1 = tf.Variable(tf.constant(0.0, shape=[self.char_hidden_dim // 2]), name='b_bak_fc1')
+            o_bak_fc1 = tf.nn.relu(tf.nn.xw_plus_b(char_bak_inputs_reshape, W_bak_fc1, b_bak_fc1), name='o_bak_fc1')
+
+            W_char_bak = tf.get_variable('softmax_char_bak_W', shape=[self.char_hidden_dim // 2, self.char_vocab_size],
+                                         initializer=tf.contrib.layers.xavier_initializer())
+            b_char_bak = tf.Variable(tf.constant(0.0, shape=[self.char_vocab_size]), name='softmax_char_bak_b')
+            char_pred_bak = tf.nn.xw_plus_b(o_bak_fc1, W_char_bak, b_char_bak, name='softmax_backward')
+            self.char_logits_bak = tf.reshape(char_pred_bak,
+                                              shape=[self.batch_size, self.max_char_len, self.char_vocab_size],
+                                              name='char_logits_bak')
+
+            losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.char_logits_bak,
+                                                                    labels=self.char_lm_backward)
+            self.char_bak_lm_loss = tf.reduce_mean(tf.boolean_mask(losses, tf.sequence_mask(self.char_lengths)))
+            char_loss += self.char_bak_lm_loss
+            print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
+
+        return char_loss
+
     def build(self):
         self.word_input_ids = tf.placeholder(tf.int32, [None, None], name='word_input')
         self.tag_input_ids = tf.placeholder(tf.int32, [None, None], name='tag_input')
@@ -194,8 +247,15 @@ class hier_bilstm(object):
         if self.params['dropout']:
             embedded_chars = tf.nn.dropout(embedded_chars, self.dropout_keep_prob)
         # char encoding
-        char_output = self._char_lstm_sent(embedded_chars)
+        char_output, char_seq_fw, char_seq_bw = self._char_lstm_sent(embedded_chars)
         word_lstm_input = tf.concat([embedded_words, char_output], axis=-1)
+
+        # add character lm
+        if self.params['char_lm']:
+            self.char_lm_forward = tf.placeholder(tf.int32, [None, None], name='char_lm_forward')
+            self.char_lm_backward = tf.placeholder(tf.int32, [None, None], name='char_lm_backward')
+            self.char_loss = self._char_lm(char_seq_fw, char_seq_bw)
+            self.total_loss += self.char_loss
 
         if self.params['dropout']:
             word_lstm_input = tf.nn.dropout(word_lstm_input, self.dropout_keep_prob)
@@ -205,7 +265,7 @@ class hier_bilstm(object):
         self.logits = self._label_prediction(word_bilstm_output)
         # calculate loss
         self.word_loss = self._loss_cal(self.logits)
-        self.total_loss = self.word_loss
+        self.total_loss += self.word_loss
 
         # optimization
         if self.params['lr_method'].lower() == 'adam':

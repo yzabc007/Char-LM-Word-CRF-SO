@@ -91,6 +91,7 @@ def Config():
     parser.add_argument('--USE_HIER_CHAR', type='bool', default=False, help='encode character in sentence level')
     parser.add_argument('--CHAR_LM', type='bool', default=False, help='using character language model')
     parser.add_argument('--WORD_LM', type='bool', default=False, help='using word language model')
+    parser.add_argument('--LM_MAX_VOCAB', type=int, default=7500, help='the max number of vocab for word lm')
 
     parser.add_argument('--CHAR_ATTENTION', type='bool', default=False)
 
@@ -199,5 +200,6 @@ def Config():
     Model_Parameters['use_hier_char'] = args.USE_HIER_CHAR
     Model_Parameters['word_lm'] = args.WORD_LM
     Model_Parameters['char_lm'] = args.CHAR_LM
+    Model_Parameters['lm_max_vocab'] = args.LM_MAX_VOCAB
 
     return Model_Parameters

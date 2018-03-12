@@ -82,9 +82,15 @@ def main():
 
     dic_chars, char_to_id, id_to_char = char_mapping(train_sents)
     # print char_to_id
-    Model_Parameters['char_vocab_size'] = len(char_to_id)
+    Model_Parameters['char_vocab_size'] = len(char_to_id) + 1
     Model_Parameters['char_to_id'] = char_to_id
     print 'Character mapped!'
+
+    if Model_Parameters['word_lm']:
+        lm_word_to_id, lm_id_to_word = lm_vocab_mapping(Model_Parameters, train_sents)
+        Model_Parameters['lm_vocab_size'] = len(lm_word_to_id)
+        Model_Parameters['lm_word_to_id'] = lm_word_to_id
+        print lm_word_to_id
     print 'Mapping finished!'
 
     # index data

@@ -67,6 +67,16 @@ def get_feed_dict(model, Model_Parameters, sents_idx_data):
             feed_dict[model.char_lm_forward] = batch_char_lm_for
             feed_dict[model.char_lm_backward] = batch_char_lm_bak
 
+    if Model_Parameters['word_lm']:
+        for_sents_batch = []
+        bak_sents_batch = []
+        for sent_data in sents_idx_data:
+            for_sents_batch.append(sent_data['forward_words'])
+            bak_sents_batch.append(sent_data['backward_words'])
+
+        feed_dict[model.forward_words] = pad_tags(for_sents_batch)
+        feed_dict[model.backward_words] = pad_tags(bak_sents_batch)
+
     # elif Model_Parameters['use_char_alone_model']:
     #     chars_batch = []
     #     char_tags_batch = []    #     feed_dict[model.tag_input_ids] = char_tags_batch
@@ -187,23 +197,6 @@ def get_max_sent_length(sentences):
 
 def get_max_char_length(sentences):
     return max([max([len(w[0]) for w in sent]) for sent in sentences])
-
-
-def extract_lm_vocab_pl(train_sents):
-    vocab_list = []
-    for sent in train_sents:
-        vocab_list += [x[0] for x in sent if x[1] == 'B-ENTITY' or x[1] == 'I-ENTITY']
-    sorted_vocab = Counter(vocab_list).most_common()
-    return sorted_vocab
-
-
-def extract_lm_vocab_nl(train_sents):
-    vocab_list = []
-    for sent in train_sents:
-        # vocab_list += [x[0] for x in sent if x[1] == 'O']
-        vocab_list += [x[0] for x in sent]
-    sorted_vocab = Counter(vocab_list).most_common()
-    return sorted_vocab
 
 
 def zero_digits(s):
