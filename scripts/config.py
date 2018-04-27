@@ -38,7 +38,7 @@ def Config():
     #optimizer parameters
     parser.add_argument('-l', '--LEARNING_RATE', type=float, default=0.001, help='learning rate')
     parser.add_argument('-L', '--LEARNING_METHOD', type=str, default='sgd', help='learning method')
-    parser.add_argument('-d', '--WEIGHT_DECAY', type=float, default=0, help='Weight decay')
+    parser.add_argument('-d', '--WEIGHT_DECAY', type=float, default=0.9, help='Weight decay')
     parser.add_argument('-n', '--CLIP_NORM', type=float, default=0, help='clip norm')
     parser.add_argument('-r', '--DROPPUT_OUT', type=float, default=0, help='droup out')
     parser.add_argument('--MOMENTUM', type=float, default=0.9)
@@ -46,11 +46,11 @@ def Config():
     parser.add_argument('-o', '--TRAIN_EPOCHS', type=int, default=1000, help='training epoch')
     parser.add_argument('-g', '--BATCH_SIZE', type=int, default=2, help='batch size')
     parser.add_argument('-q', '--FREQ_EVAL', type=int, default=10, help='frequency of evaluating on val+test set')
-    parser.add_argument('-S', '--SAVE_MODEL_PATH', type=str, default='', help='the path to store best model')
+    parser.add_argument('-S', '--SAVE_MODEL_PATH', type=str, default='saved_models/', help='the path to store best model')
     parser.add_argument('-R', '--RESTORE_MODEL_PATH', type=str, default='', help='the path to restore existing model')
     parser.add_argument('-G', '--TWO_LEVEL_CHAR_TAG', type='bool', default=False, help='whether to use two level character tagging')
     parser.add_argument('-m', '--RANDOM_SEED', type=int, default=42, help='random seed for shuffling data')
-    parser.add_argument('--SAVE_PREDICT_PATH', type=str, default='')
+    parser.add_argument('--SAVE_PREDICT_PATH', type=str, default='results/')
     parser.add_argument('--SAVED_EPOCH', type=str, default='0', help='saved epoch')
     parser.add_argument('--WORD_LOWER', type='bool', default=True)
     parser.add_argument('--INSERT_SINGLETONS', type='bool', default=False)
@@ -85,6 +85,7 @@ def Config():
     parser.add_argument('--KEYWORD_LAMBDA', type=float, default=1, help='keyword lambda')
     # parser.add_argument('--LM_LAMBDA', type=float, default=1.0)
     parser.add_argument('--CHAR_ENCODE', type=str, default='lstm', help='encoding character: lstm or cnn or None')
+    parser.add_argument('--ADD_WORD_LSTM', type='bool', default=True, help='whether to add word lstm or not')
 
     # model selection parameters
     parser.add_argument('--USE_HIER_CHAR_LM', type='bool', default=False, help='use hierarchy character lm model')
@@ -96,7 +97,7 @@ def Config():
     parser.add_argument('--CHAR_ATTENTION', type='bool', default=False)
 
     args = parser.parse_args()
-    print 'args: ', args
+    print('args: ', args)
 
     # store parameters
     Model_Parameters = OrderedDict()
@@ -113,7 +114,7 @@ def Config():
     Model_Parameters['my_test_file_path'] = args.MY_TEST_FILE_PATH
     Model_Parameters['save_predict_path'] = args.SAVE_PREDICT_PATH
     if Model_Parameters['save_predict_path'] and not os.path.exists(Model_Parameters['save_predict_path']):
-        print Model_Parameters['save_predict_path']
+        print(Model_Parameters['save_predict_path'])
         os.makedirs(Model_Parameters['save_predict_path'])
     Model_Parameters['saved_epoch'] = args.SAVED_EPOCH
 
@@ -141,6 +142,7 @@ def Config():
     Model_Parameters['max_char_len'] = 0
     Model_Parameters['dropout'] = args.DROPPUT_OUT
     Model_Parameters['char_encode'] = args.CHAR_ENCODE
+    Model_Parameters['add_word_lstm'] = args.ADD_WORD_LSTM
 
     # training parameters
     Model_Parameters['train_epochs'] = args.TRAIN_EPOCHS

@@ -45,8 +45,8 @@ def load_conll2003(path, zeros=None):
         else:
             word = line.split()
             if len(word) < 2:
-                print line
-                print word
+                print(line)
+                print(word)
             assert len(word) >= 2
             sentence.append(word)
     if len(sentence) > 0:
@@ -137,10 +137,8 @@ def word_mapping_glove(sents, Model_Parameters):
 
     W, word_to_id, id_to_word = get_embed_W(word_vecs, embed_dim=Model_Parameters['word_input_dim'])
 
-    print W.shape
-    print 'Find %i unique words on Glove (%i in total)' % (
-        len(word_to_id), len(vocab)
-    )
+    print(W.shape)
+    print('Find %i unique words on Glove (%i in total)' % (len(word_to_id), len(vocab)))
     return vocab, word_to_id, id_to_word, W
 
 
@@ -151,8 +149,7 @@ def word_mapping_random(sents):
     sorted_vocab = vocab.most_common()
     word_to_id = {x[0]: idx for idx, x in enumerate(sorted_vocab)}
     id_to_word = {v: k for k, v in word_to_id.items()}
-    print 'Find %i unique words on training set (%i in total).' % (
-        len(word_to_id), len(words))
+    print('Find %i unique words on training set (%i in total).' % (len(word_to_id), len(words)))
     return vocab, word_to_id, id_to_word
 
 
@@ -161,7 +158,7 @@ def tag_mapping(sents):
     tag_vocab = Counter(tags).most_common()
     tag_to_id = {x[0]: idx for idx, x in enumerate(tag_vocab)}
     id_to_tag = {v: k for k, v in tag_to_id.items()}
-    print 'Find %i tags.' % (len(tag_to_id))
+    print('Find %i tags.' % (len(tag_to_id)))
     return tag_vocab, tag_to_id, id_to_tag
 
 
@@ -176,7 +173,7 @@ def char_mapping(sents):
     id_to_char = {v: k for k, v in char_to_id.items()}
     assert(' ' in char_to_id)
     # print '!!!!!!!', char_to_id[' ']
-    print 'Find %i character.' % (len(char_to_id))
+    print('Find %i character.' % (len(char_to_id)))
     return char_vocab, char_to_id, id_to_char
 
 

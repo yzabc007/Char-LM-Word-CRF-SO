@@ -22,6 +22,23 @@ import matplotlib.pyplot as plt
 
 def main():
     Model_Parameters = Config()
+    print 'Model: ',
+    if Model_Parameters['char_encode'] == 'lstm' and not Model_Parameters['use_hier_char']:
+        print 'char-w-lstm',
+    elif Model_Parameters['char_encode'] == 'cnn' and not Model_Parameters['use_hier_char']:
+        print 'char-cnn',
+    elif Model_Parameters['use_hier_char']:
+        print 'char-s-lstm',
+        if Model_Parameters['char_lm']:
+            print '-lm',
+
+    print '-word-lstm',
+    if Model_Parameters['word_lm']:
+        print '-lm',
+
+    if Model_Parameters['use_crf_loss']:
+        print '-crf'
+
     np.random.seed(Model_Parameters['random_seed'])
 
     if Model_Parameters['train_file_path'][-3::] == 'pkl':
@@ -38,12 +55,14 @@ def main():
         update_tag_scheme(train_sents, Model_Parameters['tag_scheme'])
         update_tag_scheme(val_sents, Model_Parameters['tag_scheme'])
         update_tag_scheme(test_sents, Model_Parameters['tag_scheme'])
-    print 'Data loaded!'
+        # print('++++++++++++++++++')
+        # print([x for x in train_sents if len(x) < 2])
+    print('Data loaded!')
 
-    print 'Training size: ', len(train_sents)
-    print 'Val size:', len(val_sents)
-    print 'Test size: ', len(test_sents)
-    print 'An exmaple: ', train_sents[0]
+    print('Training size: ', len(train_sents))
+    print('Val size:', len(val_sents))
+    print('Test size: ', len(test_sents))
+    print('An exmaple: ', train_sents[0])
 
     if Model_Parameters['train_size'] and Model_Parameters['train_size'] < len(train_sents):
         train_sents = train_sents[:Model_Parameters['train_size']]
@@ -59,54 +78,55 @@ def main():
         Model_Parameters['max_char_len'] = max(get_max_char_length(train_sents),
                                                get_max_char_length(val_sents),
                                                get_max_char_length(test_sents))
-        print 'max_sent_len', Model_Parameters['max_sent_len']
-        print 'max_char_len', Model_Parameters['max_char_len']
+        print('max_sent_len', Model_Parameters['max_sent_len'])
+        print('max_char_len', Model_Parameters['max_char_len'])
 
     # create mapping
     if Model_Parameters['pre_trained_path']:
-        print 'Begin mapping from glove ...'
-        dic_words, word_to_id, id_to_word, W = word_mapping_glove(train_sents, Model_Parameters)
+        print('Begin mapping from glove ...')
+        dic_words, word_to_id, id_to_word, W = word_mapping_glove(train_sents+val_sents+test_sents, Model_Parameters)
         Model_Parameters['embedding_initializer'] = W.astype(np.float32)
     else:
-        print 'Begin mapping from random ...'
+        print('Begin mapping from random ...')
         dic_words, word_to_id, id_to_word = word_mapping_random(train_sents)
+        Model_Parameters['embedding_initializer'] = None
+
     Model_Parameters['vocab_size'] = len(word_to_id)
     Model_Parameters['singletons'] = set([w[0] for w in dic_words.items() if w[1] == 1])
-    print 'Word mapped!'
+    print('Word mapped!')
 
-    dic_tags, tag_to_id, id_to_tag = tag_mapping(train_sents)
+    dic_tags, tag_to_id, id_to_tag = tag_mapping(train_sents+val_sents+test_sents)
     Model_Parameters['tag_size'] = len(tag_to_id)
     Model_Parameters['id_to_word_tag'] = id_to_tag
-    print 'Tag id: ', id_to_tag
-    print 'Tag mapped!'
+    print('Tag id: ', id_to_tag)
+    print('Tag mapped!')
 
     dic_chars, char_to_id, id_to_char = char_mapping(train_sents)
     # print char_to_id
     Model_Parameters['char_vocab_size'] = len(char_to_id) + 1
     Model_Parameters['char_to_id'] = char_to_id
-    print 'Character mapped!'
+    print('Character mapped!')
 
     if Model_Parameters['word_lm']:
         lm_word_to_id, lm_id_to_word = lm_vocab_mapping(Model_Parameters, train_sents)
         Model_Parameters['lm_vocab_size'] = len(lm_word_to_id)
         Model_Parameters['lm_word_to_id'] = lm_word_to_id
-        print lm_word_to_id
-    print 'Mapping finished!'
+        # print lm_word_to_id
+    print('Mapping finished!')
 
     # index data
     train_idx_data = make_idx_data(Model_Parameters, train_sents, word_to_id, tag_to_id)
     val_idx_data = make_idx_data(Model_Parameters, val_sents, word_to_id, tag_to_id)
     test_idx_data = make_idx_data(Model_Parameters, test_sents, word_to_id, tag_to_id)
-    print 'Finish digitizing!'
-    print 'An example: ', train_idx_data[0]
+    print('Finish digitizing!')
+    print('An example: ', train_idx_data[0])
 
-    if Model_Parameters['use_hier_char']:
-        model = hier_bilstm(Model_Parameters)
-    else:
-        model = bilstm(Model_Parameters)
+    model = bilstm(Model_Parameters)
+    model.build()
 
-    print 'Begin training ...'
-    train(model, Model_Parameters, train_idx_data, val_idx_data, test_idx_data)
+    print('Begin training ...')
+    model.train(train_idx_data, val_idx_data, test_idx_data)
+    # train(model, Model_Parameters, train_idx_data, val_idx_data, test_idx_data)
 
     return
 

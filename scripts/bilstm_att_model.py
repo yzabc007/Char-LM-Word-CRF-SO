@@ -27,39 +27,53 @@ class bilstm(object):
     def _word_embedding(self, word_input_ids):
         with tf.variable_scope('word_embedding') as vs:
             if self.params['use_word2vec']:
-                W_word = tf.get_variable('Word_embedding',
-                                          initializer=self.params['embedding_initializer'],
-                                          trainable=self.params['fine_tune_w2v'],
-                                          dtype=tf.float32)
+                W_word = tf.Variable(self.params['embedding_initializer'],
+                                     name='Word_embedding',
+                                     dtype=tf.float32,
+                                     trainable=self.params['fine_tune_w2v'])
+
+                # W_word = tf.get_variable('Word_embedding',
+                #                           initializer=self.params['embedding_initializer'],
+                #                           trainable=self.params['fine_tune_w2v'],
+                #                           dtype=tf.float32)
             else:
-                W_word = tf.Variable(tf.random_uniform([self.vocab_size, self.word_input_dim], -0.25, 0.25),
-                                          trainable=True,
-                                          name='Word_embedding',
-                                          dtype=tf.float32)
+                W_word = tf.get_variable(name='Word_embedding',
+                                         dtype=tf.float32,
+                                         shape=[self.vocab_size, self.word_input_dim],
+                                         trainable=self.params['fine_tune_w2v'])
+
+                # W_word = tf.Variable(tf.random_uniform([self.vocab_size, self.word_input_dim], -0.25, 0.25),
+                #                           trainable=True,
+                #                           name='Word_embedding',
+                #                           dtype=tf.float32)
 
             embedded_words = tf.nn.embedding_lookup(W_word, word_input_ids,name='embedded_words')
-            print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
+            print(vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name))
 
         return embedded_words
 
     def _char_embedding(self, char_input_ids):
         with tf.variable_scope('char_embedding') as vs:
             drange = np.sqrt(6. / (np.sum([self.char_vocab_size-1, self.char_input_dim])))
-            char_initializer = tf.concat([tf.zeros([1, self.char_input_dim]),
-                                         tf.random_uniform([self.char_vocab_size-1, self.char_input_dim], -drange, drange)],
-                                         axis=0)
-            W_char = tf.Variable(char_initializer,
-                                 trainable=True,
-                                 name='Char_embedding',
-                                 dtype=tf.float32)
+            # char_initializer = tf.concat([tf.zeros([1, self.char_input_dim]),
+            #                              tf.random_uniform([self.char_vocab_size-1, self.char_input_dim], -0.25, 0.25)],
+            #                              axis=0)
+            W_char = tf.get_variable(name='Char_embedding',
+                                     trainable=True,
+                                     dtype=tf.float32,
+                                     shape=[self.char_vocab_size, self.char_input_dim])
+            # W_char = tf.Variable(char_initializer,
+            #                      trainable=True,
+            #                      name='Char_embedding',
+            #                      dtype=tf.float32)
 
             # (batch_size, max_sent_len, max_char_len, char_input_dim)
             embedded_chars = tf.nn.embedding_lookup(W_char, char_input_ids, name='embedded_chars')
-            print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
+            print(vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name))
 
         return embedded_chars
 
-    def _char_lstm(self, embedded_chars, word_lengths):
+    def _char_lstm_word(self, embedded_chars, word_lengths):
         with tf.variable_scope('char_lstm') as vs:
             s = tf.shape(embedded_chars)
             new_lstm_embedded_chars = tf.reshape(embedded_chars, shape=[s[0]*s[1], s[2], self.char_input_dim])
@@ -86,8 +100,7 @@ class bilstm(object):
                                                 char_bw_cell,
                                                 new_lstm_embedded_chars,
                                                 sequence_length=real_word_lengths,
-                                                dtype=tf.float32,
-                                                swap_memory=True)
+                                                dtype=tf.float32)
 
             if self.params['num_layers'] > 1:
                 char_fw_final_out = fw_state_tuples[-1][1]
@@ -95,15 +108,58 @@ class bilstm(object):
             else:
                 char_fw_final_out = fw_state_tuples[1]
                 char_bw_final_out = bw_state_tuples[1]
-            # print char_fw_final_out.get_shape()
-            # print char_bw_final_out.get_shape()
+
             char_output = tf.concat([char_fw_final_out, char_bw_final_out], axis=-1, name='Char_BiLSTM')
             char_output = tf.reshape(char_output, shape=[s[0], s[1], 2*self.char_hidden_dim]) # (batch_size, max_sent, 2*char_hidden)
+
             char_hiddens = tf.concat([seq_fw, seq_bw], axis=-1, name='char_hidden_sequence')
             char_hiddens = tf.reshape(char_hiddens, shape=[s[0], s[1], s[2], 2*self.char_input_dim]) # (batch_size*max_sent, max_char, 2*char_hidden)
-            print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
+            print(vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name))
 
         return char_output, char_hiddens
+
+    def _char_cnn(self, embedded_chars):
+        with tf.variable_scope('char_cnn') as vs:
+            s = tf.shape(embedded_chars)
+            new_cnn_embedded_chars = tf.reshape(embedded_chars, shape=[s[0]*s[1], s[2], self.char_input_dim])
+            # (batch_size*max_sent_len, max_char_len, char_input_dim)
+
+            filter_shape = [self.params['filter_size'], self.char_input_dim, self.params['num_filters']]
+            W_filter = tf.get_variable("W_filter",
+                                       shape=filter_shape,
+                                       initializer=tf.contrib.layers.xavier_initializer())
+            b_filter = tf.Variable(tf.constant(0.0, shape=[self.params['num_filters']]), name='f_filter')
+
+            # input: [batch, in_width, in_channels]
+            # filter: [filter_width, in_channels, out_channels]
+            conv = tf.nn.conv1d(new_cnn_embedded_chars,
+                                W_filter,
+                                stride=1,
+                                padding="SAME",
+                                name='conv1')
+            # (batch_size*max_sent_len, out_width, num_filters)
+            # print 'conv: ', conv.get_shape()
+
+            # h_conv1 = tf.nn.relu(tf.nn.bias_add(conv, b_filter, name='add bias'))
+            h_conv1 = tf.nn.relu(conv + b_filter)
+            h_expand = tf.expand_dims(h_conv1, -1)
+            # print 'h_expand: ', h_expand.get_shape()
+            # (batch_size*max_sent_len, out_width, num_filters, 1)
+
+            h_pooled = tf.nn.max_pool(h_expand,
+                                      ksize=[1, self.params['max_char_len'], 1, 1],
+                                      strides=[1, self.params['max_char_len'], 1, 1],
+                                      padding="SAME",
+                                      name='pooled')
+            # print 'pooled: ', h_pooled.get_shape()
+            # (batch_size*max_sent_len, num_filters, 1)
+
+            char_pool_flat = tf.reshape(h_pooled, [s[0], s[1], self.params['num_filters']])
+            # (batch_size, max_sent, num_filters)
+
+            print(vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name))
+
+        return char_pool_flat
 
     def _word_lstm(self, embedded_words, sequence_lengths):
         with tf.variable_scope('word_bilstm') as vs:
@@ -128,14 +184,13 @@ class bilstm(object):
                                                 word_bw_cell,
                                                 embedded_words,
                                                 sequence_length=sequence_lengths,
-                                                dtype=tf.float32,
-                                                swap_memory=True)
+                                                dtype=tf.float32)
 
             # (batch_size, max_sent_len, 2*word_hidden_dim)
             word_biLSTM_output = tf.concat([output_seq_fw, output_seq_bw], axis=-1, name='BiLSTM')
-            print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
+            print(vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name))
 
-        return word_biLSTM_output
+        return word_biLSTM_output, output_seq_fw, output_seq_bw
 
     def _label_prediction(self, word_bilstm_output):
         with tf.variable_scope('output_layers') as vs:
@@ -157,9 +212,68 @@ class bilstm(object):
             # (batch_size, max_sent_len, tag_size)
             logits = tf.reshape(predictions, [self.batch_size, self.max_sent_len, self.tag_size], name='logits')
 
-            print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
+            print(vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name))
 
         return logits
+
+    def _loss_cal(self, logits):
+        with tf.variable_scope('loss') as vs:
+            if self.params['use_crf_loss']:
+                log_likelihood, self.transition_params = \
+                    tf.contrib.crf.crf_log_likelihood(logits,
+                                                      self.tag_input_ids,
+                                                      self.sequence_lengths)
+                word_loss = tf.reduce_mean(-log_likelihood, name='crf_negloglik_loss')
+                # print self.transition_params.name
+            else:
+                # add softmax loss
+                self.pred_tags = tf.cast(tf.argmax(logits, axis=-1), tf.int32)
+                losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits,
+                                                                        labels=self.tag_input_ids)
+                mask = tf.sequence_mask(self.sequence_lengths)
+                losses = tf.boolean_mask(losses, mask)
+                word_loss = tf.reduce_mean(losses)
+
+            print(vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name))
+        return word_loss
+
+    def _word_lm(self, word_seq_fw, word_seq_bw):
+        lm_loss = 0
+        with tf.variable_scope('word_forward_lm') as vs:
+            W_forward = tf.get_variable('softmax_for_W',
+                                          shape=[self.word_hidden_dim, self.params['lm_vocab_size']],
+                                          initializer=tf.contrib.layers.xavier_initializer())
+            b_forward = tf.Variable(tf.constant(0.0, shape=[self.params['lm_vocab_size']]), name='softmax_for_b')
+            bilstm_for_reshape = tf.reshape(word_seq_fw, shape=[-1, self.word_hidden_dim])
+            pred_forward = tf.nn.xw_plus_b(bilstm_for_reshape, W_forward, b_forward, name='softmax_forward')
+            logits_forward = tf.reshape(pred_forward,
+                                        shape=[self.batch_size, self.max_sent_len, self.params['lm_vocab_size']],
+                                        name='logits_forward')
+            for_losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits_forward,
+                                                                        labels=self.forward_words)
+            forward_lm_loss = tf.reduce_mean(tf.boolean_mask(for_losses, tf.sequence_mask(self.sequence_lengths)))
+            lm_loss += forward_lm_loss
+
+            print(vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name))
+
+        with tf.variable_scope('word_backward_lm') as vs:
+            W_backward = tf.get_variable('softmax_bak_W',
+                                          shape=[self.word_hidden_dim, self.params['lm_vocab_size']],
+                                          initializer=tf.contrib.layers.xavier_initializer())
+            b_backward = tf.Variable(tf.constant(0.0, shape=[self.params['lm_vocab_size']]), name='softmax_bak_b')
+            bilstm_bak_reshape = tf.reshape(word_seq_bw, shape=[-1, self.word_hidden_dim])
+            pred_backward = tf.nn.xw_plus_b(bilstm_bak_reshape, W_backward, b_backward, name='softmax_backward')
+            logits_backward = tf.reshape(pred_backward,
+                                         shape=[self.batch_size, self.max_sent_len, self.params['lm_vocab_size']],
+                                         name='logits_backward')
+            bak_losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits_backward,
+                                                                        labels=self.backward_words)
+            backward_lm_loss = tf.reduce_mean(tf.boolean_mask(bak_losses, tf.sequence_mask(self.sequence_lengths)))
+            lm_loss += backward_lm_loss
+
+            print(vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name))
+
+        return lm_loss
 
     def _char_attention_layer(self, embedded_words, char_hiddens, word_lengths):
         # embedded_words: (batch_size, max_sent, word_dim)

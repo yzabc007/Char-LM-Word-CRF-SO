@@ -6,6 +6,7 @@ from utils import *
 from utils_train import *
 from conlleval_py import *
 
+
 def evaluation(sess, model, Model_Parameters, idx_data):
     tp_chunk_all = 0
     gold_chunks_all = 0

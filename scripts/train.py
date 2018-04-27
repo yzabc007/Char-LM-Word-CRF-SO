@@ -43,8 +43,9 @@ def train(model, Model_Parameters, train_idx_data, val_idx_data, test_idx_data):
 
         decay_ratio = 0.05
         for epoch in xrange(num_epochs):
-            print 'Iteration: ', epoch
-            permutation_train_idx = np.random.permutation(num_train)
+            print('Iteration: ', epoch)
+            # permutation_train_idx = np.random.permutation(num_train)
+            permutation_train_idx = range(num_train)
 
             improve_flag = False
             total_loss = 0
@@ -107,25 +108,25 @@ def train(model, Model_Parameters, train_idx_data, val_idx_data, test_idx_data):
 
             cost_time_total = time.time() - start
             cost_time_epoch = time.time() - start_epoch
-            print '\n*****Epoch: %i, precision: %6.2f%%, recall: %6.2f%%, f1 score: %6.2f%%, total cost time: %i, epoch cost time: %i, total loss: %6.6f, char loss: %6.6f, word loss: %6.6f' % (
-                    epoch, 100.*prec, 100.*recl, 100.*f1, cost_time_total, cost_time_epoch, total_loss/batch_count, char_loss/batch_count, word_loss/batch_count)
-            print '*****Epoch Evaluating on val set: ',
+            print('\n*****Epoch: %i, precision: %6.2f%%, recall: %6.2f%%, f1 score: %6.2f%%, total cost time: %i, epoch cost time: %i, total loss: %6.6f, char loss: %6.6f, word loss: %6.6f' % (
+                    epoch, 100.*prec, 100.*recl, 100.*f1, cost_time_total, cost_time_epoch, total_loss/batch_count, char_loss/batch_count, word_loss/batch_count))
+            print('*****Epoch Evaluating on val set: ')
             val_f1, val_loss, val_trues, val_preds = evaluation(sess, model, Model_Parameters, val_idx_data)
             if val_f1 > best_val_f1:
                 improve_flag = True
                 counter_early_stop = 0
                 best_val_f1 = val_f1
-                print '*****New best F1 score on val data!'
+                print('*****New best F1 score on val data!')
                 if Model_Parameters['save_model_path']:
-                    print ' Saving current model to disk ...'
+                    print(' Saving current model to disk ...')
                     saver.save(sess, Model_Parameters['save_model_path'] + 'model.ckpt', global_step=epoch)
-            print '*****Evaluting on test set: ',
+            print('*****Evaluting on test set: ')
             test_f1, test_loss, test_trues, test_preds = evaluation(sess, model, Model_Parameters, test_idx_data)
             if test_f1 > best_test_f1:
                 best_test_f1 = test_f1
-                print '*****New best F1 score on test data!'
+                print('*****New best F1 score on test data!')
                 if Model_Parameters['save_predict_path']:
-                    print '**test prediction results saved!'
+                    print('**test prediction results saved!')
                     cPickle.dump(test_trues, open(Model_Parameters['save_predict_path'] + 'test_true_results_' + str(round(test_f1, 4)) + '.pkl', 'wb'))
                     cPickle.dump(test_preds, open(Model_Parameters['save_predict_path'] + 'test_pred_results_' + str(round(test_f1, 4)) + '.pkl', 'wb'))
 
@@ -142,9 +143,9 @@ def train(model, Model_Parameters, train_idx_data, val_idx_data, test_idx_data):
             if not improve_flag:
                 counter_early_stop += 1
                 if counter_early_stop >= Model_Parameters['patiences']:
-                    print 'Early stopping at iteration: %d!' % (epoch)
+                    print('Early stopping at iteration: %d!' % (epoch))
                     break
-            print '-------------------------------------------------------------'
+            print('-------------------------------------------------------------')
             # if Model_Parameters['weight_decay']:
             #     if Model_Parameters['lr_method'] == 'sgd' or Model_Parameters['lr_method'] == 'momentum':
             #         model.params['lr_rate'] /= (1 + Model_Parameters['weight_decay'])

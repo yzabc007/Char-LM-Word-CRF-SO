@@ -1,12 +1,26 @@
 import tensorflow as tf
 import numpy as np
-from tensorflow.contrib import rnn
 import math
+import time
+from tensorflow.contrib import rnn
 
+from base_model import *
+from utils import *
+from conlleval_py import eval_conll
+from nn import EmbeddingLayer, CharLSTMLayer_Word, CharLSTMLayer_Sent, \
+    CharCNNLayer, WordLSTMLayer, LabelProjectionLayer, LMLayer
 
-class bilstm(object):
+class bilstm(BaseModel):
+    '''
+    This class implements the following models:
+    1. word-lstm-crf model
+    2. char-w-lstm-word-lstm-crf model
+    3. char-w-cnn-word-lstm-crf model
+    4. char-s-lstm-word-crf model
+    5. char-s-lstm-crf model (to-do)
+    '''
     def __init__(self, parameters, **kwargs):
-        print 'Building model ...'
+        super(bilstm, self).__init__(parameters)
         self.params = parameters
         # global
         # self.batch_size = self.params['batch_size']
@@ -25,185 +39,96 @@ class bilstm(object):
         # self.char_bidirect = self.params['char_bidirect']
         self.total_loss = 0
 
-    def _word_embedding(self, word_input_ids):
-        with tf.variable_scope('word_embedding') as vs:
-            if self.params['use_word2vec']:
-                W_word = tf.get_variable('Word_embedding',
-                                          initializer=self.params['embedding_initializer'],
-                                          trainable=self.params['fine_tune_w2v'],
-                                          dtype=tf.float32)
-            else:
-                W_word = tf.Variable(tf.random_uniform([self.vocab_size, self.word_input_dim], -0.25, 0.25),
-                                          trainable=True,
-                                          name='Word_embedding',
-                                          dtype=tf.float32)
+    def _add_placeholder(self):
+        # place holders
+        self.word_input_ids = tf.placeholder(tf.int32, [None, None], name='word_input')
+        self.tag_input_ids = tf.placeholder(tf.int32, [None, None], name='tag_input')
+        self.sequence_lengths = tf.placeholder(tf.int32, [None], name='sequence_lengths')
+        self.dropout_keep_prob = tf.placeholder(tf.float32, name='dropout_keep_prob')
+        self.lr = tf.placeholder(tf.float32, name='learning_rate')
 
-            embedded_words = tf.nn.embedding_lookup(W_word, word_input_ids,name='embedded_words')
-            print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
+        if self.params['char_encode'] and not self.params['use_hier_char']:
+            self.char_input_ids = tf.placeholder(tf.int32, [None, None, None], name='char_input')
+            self.word_lengths = tf.placeholder(tf.int32, [None, None], name='word_lengths')
+            self.max_char_len = tf.shape(self.char_input_ids)[2]
+        elif self.params['use_hier_char']:
+            self.char_input_ids = tf.placeholder(tf.int32, [None, None], name='char_input')
+            self.char_lengths = tf.placeholder(tf.int32, [None], name='char_lengths')
+            self.word_pos_for = tf.placeholder(tf.int32, [None, None, 2], name='word_positions_forward')
+            self.word_pos_bak = tf.placeholder(tf.int32, [None, None, 2], name='word_positions_backward')
+            self.max_char_len = tf.shape(self.char_input_ids)[1]
+            if self.params['char_lm']:
+                self.char_lm_forward = tf.placeholder(tf.int32, [None, None], name='char_lm_forward')
+                self.char_lm_backward = tf.placeholder(tf.int32, [None, None], name='char_lm_inputs')
 
-        return embedded_words
+        if self.params['word_lm']:
+            self.forward_words = tf.placeholder(tf.int32, [None, None], name='forward_words')
+            self.backward_words = tf.placeholder(tf.int32, [None, None], name='backward_words')
 
-    def _char_embedding(self, char_input_ids):
-        with tf.variable_scope('char_embedding') as vs:
-            drange = np.sqrt(6. / (np.sum([self.char_vocab_size-1, self.char_input_dim])))
-            char_initializer = tf.concat([tf.zeros([1, self.char_input_dim]),
-                                         tf.random_uniform([self.char_vocab_size-1, self.char_input_dim], -0.25, 0.25)],
-                                         axis=0)
-            W_char = tf.Variable(char_initializer,
-                                 trainable=True,
-                                 name='Char_embedding',
-                                 dtype=tf.float32)
+        # dynamic number
+        self.batch_size = tf.shape(self.word_input_ids)[0]
+        self.max_sent_len = tf.shape(self.word_input_ids)[1]
 
-            # (batch_size, max_sent_len, max_char_len, char_input_dim)
-            embedded_chars = tf.nn.embedding_lookup(W_char, char_input_ids, name='embedded_chars')
-            print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
+    def get_feed_dict(self, sents_idx_data, lr=None, dropout=None):
+        feed_dict = {}
+        sents_batch = []
+        tags_batch = []
+        for sent_data in sents_idx_data:
+            sents_batch.append(sent_data['word_ids'])
+            tags_batch.append(sent_data['tag_ids'])
 
-        return embedded_chars
+        sents_batch, seq_length = pad_sentence_words(sents_batch)
+        tags_batch = pad_tags(tags_batch)
+        feed_dict[self.word_input_ids] = sents_batch
+        feed_dict[self.tag_input_ids] = tags_batch
+        feed_dict[self.sequence_lengths] = seq_length
+        feed_dict[self.dropout_keep_prob] = dropout
+        feed_dict[self.lr] = lr
 
-    def _char_lstm_word(self, embedded_chars, word_lengths):
-        with tf.variable_scope('char_lstm') as vs:
-            s = tf.shape(embedded_chars)
-            new_lstm_embedded_chars = tf.reshape(embedded_chars, shape=[s[0]*s[1], s[2], self.char_input_dim])
-            # (batch_size*max_sent_len, max_char_len, char_input_dim)
-            real_word_lengths = tf.reshape(word_lengths, shape=[s[0]*s[1]])
-            if self.params['num_layers'] > 1:
-                fw_cells = []
-                bw_cells = []
-                for _ in range(self.params['num_layers']):
-                    fw_cell = rnn.LSTMCell(self.char_hidden_dim, state_is_tuple=True)
-                    fw_cell = rnn.DropoutWrapper(fw_cell, output_keep_prob=self.dropout_keep_prob)
-                    fw_cells.append(fw_cell)
-                    bw_cell = rnn.LSTMCell(self.char_hidden_dim, state_is_tuple=True)
-                    bw_cell = rnn.DropoutWrapper(bw_cell, output_keep_prob=self.dropout_keep_prob)
-                    bw_cells.append(bw_cell)
-                char_fw_cell = rnn.MultiRNNCell(fw_cells, state_is_tuple=True)
-                char_bw_cell = rnn.MultiRNNCell(bw_cells, state_is_tuple=True)
-            else:
-                char_fw_cell = rnn.LSTMCell(self.char_hidden_dim, state_is_tuple=True)
-                char_bw_cell = rnn.LSTMCell(self.char_hidden_dim, state_is_tuple=True)
+        if self.params['char_encode'] and not self.params['use_hier_char']:
+            chars_batch = []
+            for sent_data in sents_idx_data:
+                chars_batch.append(sent_data['char_ids'])
+            if self.params['char_encode'] == 'lstm':
+                char_id_batch, word_lengths = pad_word_chars(chars_batch)
+                feed_dict[self.char_input_ids] = char_id_batch
+                feed_dict[self.word_lengths] = word_lengths
+            elif self.params['char_encode'] == 'cnn':
+                char_id_batch, word_lengths = pad_word_chars(chars_batch, max_char_len=self.params['max_char_len'])
+                feed_dict[self.char_input_ids] = char_id_batch
+                feed_dict[self.word_lengths] = word_lengths
 
-            (seq_fw, seq_bw), (fw_state_tuples, bw_state_tuples) = \
-                tf.nn.bidirectional_dynamic_rnn(char_fw_cell,
-                                                char_bw_cell,
-                                                new_lstm_embedded_chars,
-                                                sequence_length=real_word_lengths,
-                                                dtype=tf.float32,
-                                                swap_memory=True)
+        if self.params['use_hier_char']:
+            chars_batch = []
+            for sent_data in sents_idx_data:
+                chars_batch.append(sent_data['char_ids'])
+            char_id_batch, char_lengths, word_pos_for, word_pos_bak = pad_word_chars_hierarchy(chars_batch)
+            feed_dict[self.char_input_ids] = char_id_batch
+            feed_dict[self.char_lengths] = char_lengths
+            feed_dict[self.word_pos_for] = word_pos_for
+            feed_dict[self.word_pos_bak] = word_pos_bak
 
-            if self.params['num_layers'] > 1:
-                char_fw_final_out = fw_state_tuples[-1][1]
-                char_bw_final_out = bw_state_tuples[-1][1]
-            else:
-                char_fw_final_out = fw_state_tuples[1]
-                char_bw_final_out = bw_state_tuples[1]
-            # print char_fw_final_out.get_shape()
-            # print char_bw_final_out.get_shape()
-            char_output = tf.concat([char_fw_final_out, char_bw_final_out], axis=-1, name='Char_BiLSTM')
-            char_output = tf.reshape(char_output, shape=[s[0], s[1], 2*self.char_hidden_dim]) # (batch_size, max_sent, 2*char_hidden)
-            char_hiddens = tf.concat([seq_fw, seq_bw], axis=-1, name='char_hidden_sequence')
-            char_hiddens = tf.reshape(char_hiddens, shape=[s[0], s[1], s[2], 2*self.char_input_dim]) # (batch_size*max_sent, max_char, 2*char_hidden)
-            print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
+            if self.params['char_lm']:
+                char_lm_forward = []
+                char_lm_backward = []
+                for sent_data in sents_idx_data:
+                    char_lm_forward.append(sent_data['char_lm_forward'])
+                    char_lm_backward.append(sent_data['char_lm_backward'])
+                batch_char_lm_for = pad_tags(char_lm_forward)
+                batch_char_lm_bak = pad_tags(char_lm_backward)
+                feed_dict[self.char_lm_forward] = batch_char_lm_for
+                feed_dict[self.char_lm_backward] = batch_char_lm_bak
 
-        return char_output, char_hiddens
+        if self.params['word_lm']:
+            for_sents_batch = []
+            bak_sents_batch = []
+            for sent_data in sents_idx_data:
+                for_sents_batch.append(sent_data['forward_words'])
+                bak_sents_batch.append(sent_data['backward_words'])
+            feed_dict[self.forward_words] = pad_tags(for_sents_batch)
+            feed_dict[self.backward_words] = pad_tags(bak_sents_batch)
 
-    def _char_cnn(self, embedded_chars):
-        with tf.variable_scope('char_cnn') as vs:
-            s = tf.shape(embedded_chars)
-            new_cnn_embedded_chars = tf.reshape(embedded_chars, shape=[s[0]*s[1], s[2], self.char_input_dim])
-            # (batch_size*max_sent_len, max_char_len, char_input_dim)
-
-            filter_shape = [self.params['filter_size'], self.char_input_dim, self.params['num_filters']]
-            W_filter = tf.get_variable("W_filter",
-                                       shape=filter_shape,
-                                       initializer=tf.contrib.layers.xavier_initializer())
-            b_filter = tf.Variable(tf.constant(0.0, shape=[self.params['num_filters']]), name='f_filter')
-
-            # input: [batch, in_width, in_channels]
-            # filter: [filter_width, in_channels, out_channels]
-            conv = tf.nn.conv1d(new_cnn_embedded_chars,
-                                W_filter,
-                                stride=1,
-                                padding="SAME",
-                                name='conv1')
-            # (batch_size*max_sent_len, out_width, num_filters)
-            # print 'conv: ', conv.get_shape()
-
-            # h_conv1 = tf.nn.relu(tf.nn.bias_add(conv, b_filter, name='add bias'))
-            h_conv1 = tf.nn.relu(conv + b_filter)
-            h_expand = tf.expand_dims(h_conv1, -1)
-            # print 'h_expand: ', h_expand.get_shape()
-            # (batch_size*max_sent_len, out_width, num_filters, 1)
-
-            h_pooled = tf.nn.max_pool(h_expand,
-                                      ksize=[1, self.params['max_char_len'], 1, 1],
-                                      strides=[1, self.params['max_char_len'], 1, 1],
-                                      padding="SAME",
-                                      name='pooled')
-            # print 'pooled: ', h_pooled.get_shape()
-            # (batch_size*max_sent_len, num_filters, 1)
-
-            char_pool_flat = tf.reshape(h_pooled, [s[0], s[1], s3elf.params['num_filters']])
-            # (batch_size, max_sent, num_filters)
-
-            print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
-
-        return char_pool_flat
-
-    def _word_lstm(self, embedded_words, sequence_lengths):
-        with tf.variable_scope('word_bilstm') as vs:
-            if self.params['num_layers'] > 1:
-                fw_cells = []
-                bw_cells = []
-                for _ in range(self.params['num_layers']):
-                    fw_cell = rnn.LSTMCell(self.word_hidden_dim, state_is_tuple=True)
-                    fw_cell = rnn.DropoutWrapper(fw_cell, output_keep_prob=self.dropout_keep_prob)
-                    fw_cells.append(fw_cell)
-                    bw_cell = rnn.LSTMCell(self.word_hidden_dim, state_is_tuple=True)
-                    bw_cell = rnn.DropoutWrapper(bw_cell, output_keep_prob=self.dropout_keep_prob)
-                    bw_cells.append(bw_cell)
-                word_fw_cell = rnn.MultiRNNCell(fw_cells, state_is_tuple=True)
-                word_bw_cell = rnn.MultiRNNCell(bw_cells, state_is_tuple=True)
-            else:
-                word_fw_cell = rnn.LSTMCell(self.word_hidden_dim, state_is_tuple=True)
-                word_bw_cell = rnn.LSTMCell(self.word_hidden_dim, state_is_tuple=True)
-
-            (output_seq_fw, output_seq_bw), _ = tf.nn.bidirectional_dynamic_rnn(
-                                                word_fw_cell,
-                                                word_bw_cell,
-                                                embedded_words,
-                                                sequence_length=sequence_lengths,
-                                                dtype=tf.float32,
-                                                swap_memory=True)
-
-            # (batch_size, max_sent_len, 2*word_hidden_dim)
-            word_biLSTM_output = tf.concat([output_seq_fw, output_seq_bw], axis=-1, name='BiLSTM')
-            print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
-
-        return word_biLSTM_output, output_seq_fw, output_seq_bw
-
-    def _label_prediction(self, word_bilstm_output):
-        with tf.variable_scope('output_layers') as vs:
-            # (batch_size*max_sent_len, 2*word_hidden_dim)
-            reshape_biLSTM_output = tf.reshape(word_bilstm_output, [-1, 2*self.word_hidden_dim])
-
-            W_fc1 = tf.get_variable("softmax_W_fc1",
-                                    shape=[2*self.word_hidden_dim, self.word_hidden_dim],
-                                    initializer=tf.contrib.layers.xavier_initializer())
-            b_fc1 = tf.Variable(tf.constant(0.0, shape=[self.word_hidden_dim]), name='softmax_b_fc1')
-            o_fc1 = tf.nn.relu(tf.nn.xw_plus_b(reshape_biLSTM_output, W_fc1, b_fc1))
-
-            W_out = tf.get_variable("softmax_W_out",
-                                    shape=[self.word_hidden_dim, self.tag_size],
-                                    initializer=tf.contrib.layers.xavier_initializer())
-            b_out = tf.Variable(tf.constant(0.0, shape=[self.tag_size]), name='softmax_b_out')
-            # self.predictions = tf.matmul(self.biLSTM_output, W_out) + b_out
-            predictions = tf.nn.xw_plus_b(o_fc1, W_out, b_out, name='softmax_output')
-            # (batch_size, max_sent_len, tag_size)
-            logits = tf.reshape(predictions, [self.batch_size, self.max_sent_len, self.tag_size], name='logits')
-
-            print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
-
-        return logits
+        return feed_dict
 
     def _loss_cal(self, logits):
         with tf.variable_scope('loss') as vs:
@@ -223,122 +148,284 @@ class bilstm(object):
                 losses = tf.boolean_mask(losses, mask)
                 word_loss = tf.reduce_mean(losses)
 
-            print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
+            print(vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name))
         return word_loss
 
-    def _word_lm(self, word_seq_fw, word_seq_bw):
-        lm_loss = 0
-        with tf.variable_scope('forward_lm') as vs:
-            W_forward = tf.get_variable('softmax_for_W',
-                                          shape=[self.word_hidden_dim, self.params['lm_vocab_size']],
-                                          initializer=tf.contrib.layers.xavier_initializer())
-            b_forward = tf.Variable(tf.constant(0.0, shape=[self.params['lm_vocab_size']]), name='softmax_for_b')
-            bilstm_for_reshape = tf.reshape(word_seq_fw, shape=[-1, self.word_hidden_dim])
-            pred_forward = tf.nn.xw_plus_b(bilstm_for_reshape, W_forward, b_forward, name='softmax_forward')
-            logits_forward = tf.reshape(pred_forward,
-                                        shape=[self.batch_size, self.max_sent_len, self.params['lm_vocab_size']],
-                                        name='logits_forward')
-            for_losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits_forward,
-                                                                        labels=self.forward_words)
-            forward_lm_loss = tf.reduce_mean(tf.boolean_mask(for_losses, tf.sequence_mask(self.sequence_lengths)))
-            lm_loss += forward_lm_loss
+    def add_train_op(self, lr_method, lr, loss, clip=-1, momentum=0):
+        """Defines self.train_op that performs an update on a batch
 
-            print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
+        Args:
+            lr_method: (string) sgd method, for example "adam"
+            lr: (tf.placeholder) tf.float32, learning rate
+            loss: (tensor) tf.float32 loss to minimize
+            clip: (python float) clipping of gradient. If < 0, no clipping
 
-        with tf.variable_scope('backward_lm') as vs:
-            W_backward = tf.get_variable('softmax_bak_W',
-                                          shape=[self.word_hidden_dim, self.params['lm_vocab_size']],
-                                          initializer=tf.contrib.layers.xavier_initializer())
-            b_backward = tf.Variable(tf.constant(0.0, shape=[self.params['lm_vocab_size']]), name='softmax_bak_b')
-            bilstm_bak_reshape = tf.reshape(word_seq_bw, shape=[-1, self.word_hidden_dim])
-            pred_backward = tf.nn.xw_plus_b(bilstm_bak_reshape, W_backward, b_backward, name='softmax_backward')
-            logits_backward = tf.reshape(pred_backward,
-                                         shape=[self.batch_size, self.max_sent_len, self.params['lm_vocab_size']],
-                                         name='logits_backward')
-            bak_losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits_backward,
-                                                                        labels=self.backward_words)
-            backward_lm_loss = tf.reduce_mean(tf.boolean_mask(bak_losses, tf.sequence_mask(self.sequence_lengths)))
-            lm_loss += backward_lm_loss
+        """
+        _lr_m = lr_method.lower() # lower to make sure
 
-            print vs.name, tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=vs.name)
+        with tf.variable_scope("train_step"):
+            if _lr_m == 'adam':
+                optimizer = tf.train.AdamOptimizer(lr)
+            elif _lr_m == 'adagrad':
+                optimizer = tf.train.AdagradOptimizer(lr)
+            elif _lr_m == 'adadelta':
+                optimizer = tf.train.AdadeltaOptimizer(lr)
+            elif _lr_m == 'sgd':
+                optimizer = tf.train.GradientDescentOptimizer(lr)
+            elif _lr_m == 'rmsprop':
+                optimizer = tf.train.RMSPropOptimizer(lr)
+            elif _lr_m == 'momentum':
+                optimizer = tf.train.MomentumOptimizer(lr, momentum)
+            else:
+                raise NotImplementedError("Unknown method {}".format(_lr_m))
 
-        return lm_loss
+            if clip > 0: # gradient clipping if clip is positive
+                grads, vs = zip(*optimizer.compute_gradients(loss))
+                grads, gnorm = tf.clip_by_global_norm(grads, clip)
+                self.train_op = optimizer.apply_gradients(zip(grads, vs))
+            else:
+                self.train_op = optimizer.minimize(loss)
 
     def build(self):
-        # place holders
-        self.word_input_ids = tf.placeholder(tf.int32, [None, None], name='word_input')
-        self.tag_input_ids = tf.placeholder(tf.int32, [None, None], name='tag_input')
-        self.dropout_keep_prob = tf.placeholder(tf.float32, name='dropout_keep_prob')
-        self.sequence_lengths = tf.placeholder(tf.int32, [None], name='sequence_lengths')
-        self.char_input_ids = tf.placeholder(tf.int32, [None, None, None], name='char_input')
-        self.word_lengths = tf.placeholder(tf.int32, [None, None], name='word_lengths')
-
-        # dynamic number
-        self.batch_size = tf.shape(self.word_input_ids)[0]
-        self.max_sent_len = tf.shape(self.word_input_ids)[1]
-        self.max_char_len = tf.shape(self.char_input_ids)[2]
-
+        self._add_placeholder()
         # word embedding
-        embedded_words = self._word_embedding(self.word_input_ids)
-        if self.params['dropout']:
-            embedded_words = tf.nn.dropout(embedded_words, self.dropout_keep_prob)
+        word_embed_layer = EmbeddingLayer('word_embeddings',
+                                          self.vocab_size,
+                                          self.word_input_dim,
+                                          self.params['fine_tune_w2v'])
 
-        if self.params['char_encode'] == 'lstm':
+        embedded_words = word_embed_layer.link(self.word_input_ids,
+                                               self.params['use_word2vec'],
+                                               self.params['embedding_initializer'])
+        embedded_words = tf.nn.dropout(embedded_words, self.dropout_keep_prob)
+        word_vectors = embedded_words
+        word_vector_dim = self.word_input_dim
 
-            # char embedding
-            embedded_chars = self._char_embedding(self.char_input_ids)
-            if self.params['dropout']:
-                embedded_chars = tf.nn.dropout(embedded_chars, self.dropout_keep_prob)
-            # char encoding
-            char_output, char_hiddens = self._char_lstm_word(embedded_chars, self.word_lengths)
-            word_lstm_input = tf.concat([embedded_words, char_output], axis=-1)
-        elif self.params['char_encode'] == 'cnn':
+        if self.params['char_encode'] or self.params['use_hier_char']:
+            char_embed_layer = EmbeddingLayer('char_embeddings',
+                                              self.char_vocab_size,
+                                              self.char_input_dim,
+                                              trainable=True)
+            embedded_chars = char_embed_layer.link(self.char_input_ids,
+                                                   pre_train=False)
+            embedded_chars = tf.nn.dropout(embedded_chars, self.dropout_keep_prob)
 
-            # char embedding
-            embedded_chars = self._char_embedding(self.char_input_ids)
-            if self.params['dropout']:
-                embedded_chars = tf.nn.dropout(embedded_chars, self.dropout_keep_prob)
-            # char encoding
-            char_output = self._char_cnn(embedded_chars)
-            word_lstm_input = tf.concat([embedded_words, char_output], axis=-1)
-        else:
-            word_lstm_input = embedded_words
+            if self.params['use_hier_char']:
+                char_lstm_sent_layer = CharLSTMLayer_Sent('char_lstm_sent',
+                                                          self.char_hidden_dim)
+                char_output, char_seq_fw, char_seq_bw = char_lstm_sent_layer.link(embedded_chars,
+                                                                             self.char_lengths,
+                                                                             self.word_pos_for,
+                                                                             self.word_pos_bak)
+                word_vectors = tf.concat([word_vectors, char_output], axis=-1)
+                word_vector_dim += 2*self.char_hidden_dim
 
-        if self.params['dropout']:
-            word_lstm_input = tf.nn.dropout(word_lstm_input, self.dropout_keep_prob)
+                if self.params['char_lm']:
+                    char_lm_layer = LMLayer('char_lm',
+                                            self.char_hidden_dim,
+                                            self.params['char_vocab_size'],
+                                            self.batch_size,
+                                            self.max_char_len)
+                    self.char_lm_loss = char_lm_layer.link(char_seq_fw,
+                                                        char_seq_bw,
+                                                        self.char_lm_forward,
+                                                        self.char_lm_forward,
+                                                        self.char_lengths)
+                    self.total_loss += self.char_lm_loss
+
+            elif self.params['char_encode'] == 'lstm':
+                char_lstm_word_layer = CharLSTMLayer_Word('char_lstm_word',
+                                                          self.params['num_layers'],
+                                                          self.char_input_dim,
+                                                          self.char_hidden_dim,
+                                                          self.dropout_keep_prob)
+                char_output, char_hiddens = char_lstm_word_layer.link(embedded_chars, self.word_lengths)
+                word_vectors = tf.concat([word_vectors, char_output], axis=-1)
+                word_vector_dim += 2*self.char_hidden_dim
+
+            elif self.params['char_encode'] == 'cnn':
+                char_cnn_layer = CharCNNLayer('char_cnn',
+                                              self.char_input_dim,
+                                              self.params['filter_size'],
+                                              self.params['num_filters'],
+                                              self.params['max_char_len'])
+                char_output = char_cnn_layer.link(embedded_chars)
+                word_vectors = tf.concat([word_vectors, char_output], axis=-1)
+                word_vector_dim += self.params['num_filters']
+
+        word_vectors = tf.nn.dropout(word_vectors, self.dropout_keep_prob)
+        # can we omit the following step?
         # word encoding
-        word_bilstm_output, word_seq_fw, word_seq_bw = self._word_lstm(word_lstm_input, self.sequence_lengths)
-        # intermediate fc layers
-        self.logits = self._label_prediction(word_bilstm_output)
+        if self.params['add_word_lstm']:
+            word_lstm_layer = WordLSTMLayer('word_lstm',
+                                            self.params['num_layers'],
+                                            self.word_hidden_dim,
+                                            self.dropout_keep_prob)
+            word_bilstm_output, word_seq_fw, word_seq_bw = word_lstm_layer.link(word_vectors,
+                                                                                self.sequence_lengths)
+            word_vector_dim = 2*self.word_hidden_dim
+
+        label_projection_layer = LabelProjectionLayer('label_projection',
+                                                      word_vector_dim,
+                                                      self.tag_size,
+                                                      self.batch_size,
+                                                      self.max_sent_len)
+        self.logits = label_projection_layer.link(word_bilstm_output)
+
         # calculate loss
         self.word_loss = self._loss_cal(self.logits)
         self.total_loss += self.word_loss
 
         if self.params['word_lm']:
-            self.forward_words = tf.placeholder(tf.int32, [None, None], name='forward_words')
-            self.backward_words = tf.placeholder(tf.int32, [None, None], name='backward_words')
-            self.word_lm_loss = self._word_lm(word_seq_fw, word_seq_bw)
-            self.total_loss += self.word_lm_loss
+            word_lm_layer = LMLayer('word_lm',
+                                    self.word_hidden_dim,
+                                    self.params['lm_vocab_size'],
+                                    self.batch_size,
+                                    self.max_sent_len)
+            word_lm_loss = word_lm_layer.link(word_seq_fw,
+                                              word_seq_bw,
+                                              self.forward_words,
+                                              self.backward_words,
+                                              self.sequence_lengths)
+            # word_lm_loss = self._word_lm(word_seq_fw, word_seq_bw)
+            self.total_loss += word_lm_loss
 
-        # optimization
-        if self.params['lr_method'].lower() == 'adam':
-            optimizer_total = tf.train.AdamOptimizer(self.params['lr_rate'])
-        elif self.params['lr_method'].lower() == 'adagrad':
-            optimizer_total = tf.train.AdagradOptimizer(self.params['lr_rate'])
-        elif self.params['lr_method'].lower() == 'adadelta':
-            optimizer_total = tf.train.AdadeltaOptimizer(self.params['lr_rate'])
-        elif self.params['lr_method'].lower() == 'sgd':
-            optimizer_total = tf.train.GradientDescentOptimizer(self.params['lr_rate'])
-        elif self.params['lr_method'].lower() == 'rmsprop':
-            optimizer_total = tf.train.RMSPropOptimizer(self.params['lr_rate'])
-        elif self.params['lr_method'].lower() == 'momentum':
-            optimizer_total = tf.train.MomentumOptimizer(self.params['lr_rate'], self.params['momentum'])
+        # for tensorboard
+        tf.summary.scalar("loss", self.total_loss)
 
-        if self.params['clip_norm'] > 0:
-            grads, vs = zip(*optimizer_total.compute_gradients(self.total_loss))
-            grads, gnorm = tf.clip_by_global_norm(grads, self.params['clip_norm'])
-            self.total_train_op = optimizer_total.apply_gradients(zip(grads, vs))
+        # Generic functions that add training op and initialize session
+        self.add_train_op(self.params['lr_method'],
+                          self.lr,
+                          self.total_loss,
+                          self.params['clip_norm'],
+                          self.params['momentum'])
+        self.initialize_session() # now self.sess is defined and vars are init
+
+    def run_epoch(self, train_data, val_data, epoch):
+        """Performs one complete pass over the train set and evaluate on dev
+
+        Args:
+            train: dataset that yields tuple of sentences, tags
+            dev: dataset
+            epoch: (int) index of the current epoch
+
+        Returns:
+            f1: (python float), score to select model on, higher is better
+
+        """
+        # progbar stuff for logging
+        batch_size = self.params['batch_size']
+        num_train_data = len(train_data)
+        nbatches = (num_train_data + batch_size - 1) // batch_size
+        # prog = Progbar(target=nbatches)
+
+        train_counter = 0
+        batch_counter = 0
+        # permutation_train_idx = np.random.permutation(num_train)
+        # permutation_train_idx = range(num_train)
+
+        # iterate over dataset
+        # for i, (words, labels) in enumerate(minibatches(train, batch_size)):
+        while train_counter < num_train_data:
+            batch_data = []
+            for i in range(batch_size):
+                idx = i + train_counter
+                if idx >= num_train_data:
+                    continue
+                batch_data.append(train_data[idx])
+
+            train_counter += batch_size
+            batch_counter += 1
+            fd = self.get_feed_dict(batch_data, lr=self.params['lr_rate'], dropout=self.params['dropout'])
+            # print(fd.keys())
+            _, train_loss, summary = self.sess.run([self.train_op, self.total_loss, self.merged], feed_dict=fd)
+            # prog.update(i + 1, [("train loss", train_loss)])
+
+            # tensorboard
+            if batch_counter % 10 == 0:
+                self.file_writer.add_summary(summary, epoch*nbatches + batch_counter)
+
+        print('Evaluate on val set: ')
+        metrics = self.run_evaluate(val_data)
+        # msg = " - ".join(["{} {:04.2f}".format(k, v)
+        #         for k, v in metrics.items()])
+        # self.logger.info(msg)
+
+        return metrics['f1']
+
+    def run_evaluate(self, test_data):
+        batch_size = self.params['batch_size']
+        data_count = 0
+        batch_count = 0
+        total_loss = 0
+        start = time.time()
+
+        tp_chunk_all = 0
+        gold_chunks_all = 0
+        pred_chunks_all = 0
+        # collect all samples for returning
+        pred_all_set = []
+        true_all_set = []
+        while data_count < len(test_data):
+            batch_data = []
+            for i in range(batch_size):
+                index = i + data_count
+                if index >= len(test_data):
+                    continue
+                batch_data.append(test_data[index])
+            data_count += batch_size
+            batch_count += 1
+
+            feed_dict_ = self.get_feed_dict(batch_data, dropout=1.0)
+            pred_tags, batch_total_loss = self.predict_batch(feed_dict_)
+            total_loss += batch_total_loss
+            for idx in xrange(len(pred_tags)):
+                seq_length = feed_dict_[self.sequence_lengths][idx]
+                y_real = feed_dict_[self.tag_input_ids][idx][:seq_length]
+                y_pred = pred_tags[idx]
+                true_all_set.append(y_real)
+                pred_all_set.append(y_pred)
+                assert (len(y_real) == len(y_pred))
+
+                tp_chunk_batch, gold_chunk_batch, pred_chunk_batch \
+                    = eval_conll(y_real, y_pred, self.params['id_to_word_tag'])
+
+                tp_chunk_all += tp_chunk_batch
+                gold_chunks_all += gold_chunk_batch
+                pred_chunks_all += pred_chunk_batch
+
+        prec = 0 if pred_chunks_all == 0 else 1. * tp_chunk_all / pred_chunks_all
+        recl = 0 if gold_chunks_all == 0 else 1. * tp_chunk_all / gold_chunks_all
+        f1 = 0 if prec + recl == 0 else (2. * prec * recl) / (prec + recl)
+        cost_time = time.time() - start
+
+        print 'precision: %6.2f%%' % (100. * prec),
+        print 'recall: %6.2f%%' % (100. * recl),
+        print 'f1 score: %6.2f%%' % (100. * f1),
+        print 'cost time: %i' % cost_time,
+        print 'total loss: %6.6f' % (total_loss / batch_count)
+        # print 'char loss: %6.6f' % (char_loss / batch_count),
+        # print 'word loss: %6.6f' % (word_loss / batch_count)
+
+        return {'f1': f1, 'loss': total_loss / batch_count,
+                'true_label': true_all_set, 'pred_label': pred_all_set}
+        # return f1, total_loss / batch_count, true_all_set, pred_all_set
+
+    def predict_batch(self, feed_dict_):
+        pred_tags_batch = []
+
+        if self.params['use_crf_loss']:
+            total_loss, logits, transition_params = \
+                self.sess.run([self.total_loss, self.logits, self.transition_params], feed_dict=feed_dict_)
+            seq_lengths = feed_dict_[self.sequence_lengths]
+            for idx_batch in xrange(len(seq_lengths)):
+                seq_score = logits[idx_batch, :seq_lengths[idx_batch], :]
+                pred_tags, pred_tags_score = tf.contrib.crf.viterbi_decode(seq_score, transition_params)
+                pred_tags_batch.append(pred_tags)
         else:
-            self.total_train_op = optimizer_total.minimize(self.total_loss)
+            total_loss, pred_tags = self.sess.run([self.total_loss, self.pred_tags], feed_dict=feed_dict_)
+            seq_lengths = feed_dict_[self.sequence_lengths]
+            for idx_batch in xrange(len(seq_lengths)):
+                pred_tags_batch.append(pred_tags[idx_batch, :seq_lengths[idx_batch]])
 
-        return
+        return pred_tags_batch, total_loss
