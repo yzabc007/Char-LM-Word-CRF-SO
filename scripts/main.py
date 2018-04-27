@@ -32,9 +32,11 @@ def main():
         if Model_Parameters['char_lm']:
             print '-lm',
 
-    print '-word-lstm',
+    if Model_Parameters['ADD_WORD_LSTM']:
+        print '-word-lstm',
+
     if Model_Parameters['word_lm']:
-        print '-lm',
+        print '-word-lm',
 
     if Model_Parameters['use_crf_loss']:
         print '-crf'
