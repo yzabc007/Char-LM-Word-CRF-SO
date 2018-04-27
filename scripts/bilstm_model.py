@@ -261,8 +261,8 @@ class bilstm(BaseModel):
                                             self.params['num_layers'],
                                             self.word_hidden_dim,
                                             self.dropout_keep_prob)
-            word_bilstm_output, word_seq_fw, word_seq_bw = word_lstm_layer.link(word_vectors,
-                                                                                self.sequence_lengths)
+            word_vectors, word_seq_fw, word_seq_bw = word_lstm_layer.link(word_vectors,
+                                                                          self.sequence_lengths)
             word_vector_dim = 2*self.word_hidden_dim
 
         label_projection_layer = LabelProjectionLayer('label_projection',
@@ -270,7 +270,7 @@ class bilstm(BaseModel):
                                                       self.tag_size,
                                                       self.batch_size,
                                                       self.max_sent_len)
-        self.logits = label_projection_layer.link(word_bilstm_output)
+        self.logits = label_projection_layer.link(word_vectors)
 
         # calculate loss
         self.word_loss = self._loss_cal(self.logits)
